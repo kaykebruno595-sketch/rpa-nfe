@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "pivotal-nebula-249220",
+  "private_key_id": "1249dbd2dc0321178e7b7e97d12efffecdcbe4fd",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDOAudyC5QO9bPw\nJS4dakVBQoR8yaG8ZWHkScibG+SIcwyu8sDnsVgzzBg0LZO15AsFhoVcw8nrPCl9\nDoCS1i0634Skc6YWpv86K4WHI1nEC8hzCXqU7VXTuYOVr/95DASNfvAsiNP/Hl9W\nli/nH0p8gswqoueCxSXiX8HAhCs5A4obt3/bBrgW/CtoWRIWQnvMPJGxtRjUDGYU\nA/Poq79zrEPnh/5CXs3jA1+PaqgTmfzPbiY99PI4U9d2NXoyA7O7fl5ktz2FNCWT\nE9viqAYYsAPqYr9NyEet8Scej3ocAQ7mXHW1bf4fIjhNhv6mFVEehxOzWvTUzNkC\nE4nEtHm7AgMBAAECggEASa1rNfPjH1iLYnsBm56KpzTRakm4cMb3dCxZNPQMTyqK\nYjVKfXKFH31COMMGHVqyAGdkYdFZ8SnikqmxnRJBOdl/uEruHxLZm+W9yx9+9qja\nJx5AO2wIMoEaCNpZbWK5bBt2bQ8AdrDXmwF6n1enDZG/0A3T64ZzrprdkesTBD/V\n2Gsjrsq4rx9aD4Rw/6Xt4V2EaidkYuv0lVPJMqBJn5t6FuMagiEkHdwlsHwFINUJ\nOeZhQBpSGJxxrs0m9KEKnuuS1Z9JUR3N71P3khkjlT9NHFwvRFHlV4kS2upucjwR\nKqf8xJLLFcSeig43EB9yqmuQ+A1KZrTUJ9pi8wEY3QKBgQDxXm5TcvjsmSBmUPfO\nNwKqMILicqCUxySLeUZ/jkXbahOFPWz+A+D6Fk8aZKjtJx34JkTuL2AOw169WY4x\nqP0Q6ch916iUtgDofQJqLnI37/xtAG74Hd4VL9CjIHZcuTBam8T1sm/as5tTgMMR\nRGBfBv5VyjbCqSm22qzRn+HYFQKBgQDaf8tERbAvufO4Y+aem3YhDZy7cdOoy3Ne\nXIBWzHE8eGEjQQPyASU1FtBbKE1sg9CxIkrikEmT59/7EBmlmxBgOhjmh12P4s9E\nZEcSwazKLz7EZzA98x1YGTvud78XDgVGHd/nde0nET9LnTURrYuFI5LGbFudoOlv\nh77aSxUujwKBgQCyoykUKeuBcHNCRnqg7KXUP8MexaeDdT/e2gsLLMkW8xMvcZ7R\nAR3o+cnhxs4fduv/VJN/lSCKzJ25liZfKqrhcaUpPgtOxMU3TA4Vd/qg28T/B2sZ\nx0EufQz1LnlrdsQKy26iSUXvny4+RvYYOXr52bsy005kE78DziRJoQMNYQKBgFSS\nuIPxkXO3vz109bQYqo26rhrjwTCJp1sz5L00HvRwB/FUXgmTJeq5rOZL4EQLdYDK\nrD+r577nNowAPF0ceycz9aVtaeqiuOVZByWcb5xG0z3ETyj7bDVIdykjkoSC+cmd\nEKiPvb6sb1p+PCdejC15inthP8jwmsp/uYDXJRjDAoGAXibvjiVAwGudLaqteYTw\nhCrUac22slGQXJIopv5wbKV5F3vRZlRScQkF9RkIJKs6OLFfzfmrE5cDHd9UvTB5\ns5l/nDUGJRrktS+qwRHSV2vmJvYrPVMAIFDxl9oTdaVPJnFDEtXFTMy9TezC0S6l\n7ffnJdgel3WfixbMWHBluFE=\n-----END PRIVATE KEY-----\n",
+  "client_email": "robo-xml@pivotal-nebula-249220.iam.gserviceaccount.com",
+  "client_id": "113343264372500516170",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/robo-xml%40pivotal-nebula-249220.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
