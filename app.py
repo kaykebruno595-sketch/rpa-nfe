@@ -1,122 +1,166 @@
 import streamlit as st
 import xml.etree.ElementTree as ET
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import os
+import pandas as pd
+import io
+import requests
+import base64
+import json
 
-# --- CONEXÃO COM O GOOGLE SHEETS ---
-def conectar_google_sheets():
-    # Define o escopo de acesso às APIs do Google
-    escopo = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    
-    # Carrega a credencial do arquivo JSON
-    if not os.path.exists("credenciais.json"):
-        st.error("❌ Arquivo 'credenciais.json' não encontrado na pasta do servidor!")
-        return None
-        
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credenciais.json", escopo)
-    cliente = gspread.authorize(creds)
-    
-    # ABRA PELO NOME EXATO DA SUA PLANILHA NO GOOGLE DRIVE
-    # O e-mail do robô precisa estar como editor nela!
-    planilha = cliente.open("Consolidado_Notas_Oficial").sheet1
-    return planilha
+st.set_page_config(page_title="RPA - Extrator Acumulado", layout="centered")
 
-# --- PROCESSAR O XML E SALVAR NA NUVEM ---
-def processar_xml_web(arquivo_xml, planilha_google):
-    # Ler o conteúdo do arquivo enviado pelo site
-    conteudo_xml = arquivo_xml.read()
-    root = ET.fromstring(conteudo_xml)
+st.title("📦 Extrator de Notas Fiscais (Histórico Único)")
+st.write("Os novos XMLs arrastados serão somados à base de dados existente.")
 
-    ns = {'ns': root.tag.split('}')[0].strip('{')} if '}' in root.tag else {}
-    prefixo = 'ns:' if ns else ''
+# Configurações do seu GitHub
+GITHUB_REPO = "kaykebruno59-sketch/rpa-nfe"
+FILE_PATH = "planilha_acumulada.xlsx"
+BRANCH = "principal"
 
-    # 1. Pegar número da nota
-    num_nota = ""
-    elem_nNF = root.find(f".//{prefixo}ide/{prefixo}nNF", ns)
-    if elem_nNF is not None:
-        num_nota = elem_nNF.text
+# Recuperar o Token que salvamos no Secrets
+if "GITHUB_TOKEN" not in st.secrets:
+    st.error("Erro: O GITHUB_TOKEN não foi configurado no menu Secrets do Streamlit.")
+    st.stop()
 
-    # --- TRAVA ANTIDUPLICIDADE EM TEMPO REAL ---
-    # Busca todos os valores da coluna A (Número da Nota) direto no Google Sheets
-    try:
-        notas_existentes = planilha_google.col_values(1) # Coluna 1 = Coluna A
-        if str(num_nota) in notas_existentes:
-            return f"⚠️ Nota {num_nota} já foi cadastrada anteriormente (Ignorada).", "aviso"
-    except Exception as e:
-        return f"Erro ao verificar duplicados: {e}", "erro"
+TOKEN = st.secrets["GITHUB_TOKEN"]
+headers = {"Authorization": f"token {TOKEN}"}
+url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}?ref={BRANCH}"
 
-    # 2. Se não for duplicada, extrai os pesos
-    peso_liquido = 0.0
-    peso_bruto = 0.0
-    elem_peso_l = root.find(f".//{prefixo}transp/{prefixo}vol/{prefixo}pesoL", ns)
-    if elem_peso_l is not None and elem_peso_l.text:
-        peso_liquido = float(elem_peso_l.text)
-        
-    elem_peso_b = root.find(f".//{prefixo}transp/{prefixo}vol/{prefixo}pesoB", ns)
-    if elem_peso_b is not None and elem_peso_b.text:
-        peso_bruto = float(elem_peso_b.text)
-
-    # 3. Extrai itens e envia linha por linha para a Nuvem
-    itens = root.findall(f".//{prefixo}det", ns)
-    linhas_para_inserir = []
-    
-    for item in itens:
-        prod = item.find(f"{prefixo}prod", ns)
-        nome_produto = prod.find(f"{prefixo}xProd", ns).text
-        quantidade = float(prod.find(f"{prefixo}qCom", ns).text)
-        valor_total_prod = float(prod.find(f"{prefixo}vProd", ns).text)
-        
-        imposto = item.find(f"{prefixo}imposto", ns)
-        valor_icms = 0.0
-        elem_icms = imposto.find(f".//{prefixo}vICMS", ns)
-        if elem_icms is not None and elem_icms.text:
-            valor_icms = float(elem_icms.text)
-            
-        valor_ipi = 0.0
-        elem_ipi = imposto.find(f".//{prefixo}vIPI", ns)
-        if elem_ipi is not None and elem_ipi.text:
-            valor_ipi = float(elem_ipi.text)
-            
-        # Alinhado com o seu modelo do Google Sheets
-        nova_linha = [
-            num_nota, nome_produto, quantidade, valor_total_prod, 
-            valor_icms, valor_ipi, peso_liquido, peso_bruto
-        ]
-        linhas_para_inserir.append(nova_linha)
-
-    # Envia o bloco de linhas para o final da planilha do Google
-    planilha_google.append_rows(linhas_para_inserir)
-    return f"✅ Nota {num_nota} processada e enviada para o Google Sheets!", "sucesso"
-
-
-# --- CONFIGURAÇÃO DA INTERFACE WEB (STREAMLIT) ---
-st.set_page_config(page_title="RPA Notas Fiscais", page_icon="🤖")
-
-st.title("🤖 Portal RPA - Consolidador de NF-e")
-st.write("Insira os arquivos XML das Notas Fiscais abaixo. O sistema irá validar os dados e alimentar a planilha oficial na nuvem automaticamente.")
-
-# Botão de Upload na Tela Web
-arquivos = st.file_uploader("Arraste ou selecione os arquivos XML aqui", type="xml", accept_multiple_files=True)
-
-if st.button("🚀 Processar Notas e Atualizar Nuvem"):
-    if arquivos:
-        # Conecta ao Google Sheets antes de começar o loop
-        with st.spinner("Conectando ao Google Sheets..."):
-            aba_google = conectar_google_sheets()
-            
-        if aba_google:
-            # Passa por cada arquivo arrastado no site
-            for arquivo in arquivos:
-                mensagem, tipo = processar_xml_web(arquivo, aba_google)
-                
-                # Exibe o resultado individual de cada nota na tela do usuário
-                if tipo == "sucesso":
-                    st.success(mensagem)
-                elif tipo == "aviso":
-                    st.warning(mensagem)
-                else:
-                    st.error(mensagem)
-            st.balloons() # Efeito visual de sucesso no site
+# --- FUNÇÃO PARA BUSCAR A PLANILHA EXISTENTE NO GITHUB ---
+def buscar_planilha_github():
+    resposta = requests.get(url, headers=headers)
+    if resposta.status_code == 200:
+        conteudo_json = resposta.json()
+        conteudo_base64 = conteudo_json["content"]
+        sha = conteudo_json["sha"]
+        dados_binarios = base64.b64decode(conteudo_base64)
+        df = pd.read_excel(io.BytesIO(dados_binarios))
+        return df, sha
     else:
-        st.info("Por favor, selecione pelo menos um arquivo XML antes de clicar.")
+        # Se o arquivo não existir ainda, cria um DataFrame vazio com as colunas
+        columns = ["Número da Nota", "Produto", "Quantidade", "Valor", "ICMS", "IPI", "Peso Líquido", "Peso Bruto"]
+        return pd.DataFrame(columns=columns), None
+
+# --- FUNÇÃO PARA SALVAR A PLANILHA ATUALIZADA NO GITHUB ---
+def salvar_planilha_github(df_novo, sha_antigo):
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df_novo.to_excel(writer, index=False)
+    buffer.seek(0)
+    conteudo_base64 = base64.b64encode(buffer.read()).decode("utf-8")
+    
+    dados_envio = {
+        "message": "🤖 RPA: Atualizando planilha de notas fiscais",
+        "content": conteudo_base64,
+        "branch": BRANCH
+    }
+    if sha_antigo:
+        dados_envio["sha"] = sha_antigo
+        
+    resposta = requests.put(url, headers=headers, data=json.dumps(dados_envio))
+    return resposta.status_code in [200, 201]
+
+# Carregar o histórico atual
+df_historico, sha_atual = buscar_planilha_github()
+
+# Mostrar o histórico atual na tela
+if not df_historico.empty:
+    st.subheader("📋 Histórico de Notas Já Salvas")
+    st.dataframe(df_historico)
+
+# Campo para o usuário arrastar os novos XMLs
+arquivos_xml = st.file_uploader("Arraste os NOVOS arquivos XML aqui", type=["xml"], accept_multiple_files=True)
+
+if arquivos_xml:
+    dados_novos = []
+    notas_ignoradas = 0
+    
+    # Pegar lista de notas que já existem para não duplicar
+    notas_existentes = df_historico["Número da Nota"].astype(str).tolist()
+    
+    for arquivo in arquivos_xml:
+        try:
+            conteudo_xml = arquivo.read()
+            raiz = ET.fromstring(conteudo_xml)
+            ns = {'ns': 'http://www.portalfiscal.inf.br/nfe'}
+            
+            infNFe = raiz.find('.//ns:infNFe', ns)
+            if infNFe is None: continue
+                
+            ide = infNFe.find('ns:ide', ns)
+            num_nota = ide.find('ns:nNF', ns).text if ide is not None else "N/A"
+            
+            # Evitar duplicados
+            if str(num_nota) in notas_existentes:
+                notas_ignoradas += 1
+                continue
+            
+            # Pesos
+            transp = infNFe.find('ns:transp', ns)
+            peso_liquido = "-"
+            peso_bruto = "-"
+            if transp is not None:
+                vol = transp.find('ns:vol', ns)
+                if vol is not None:
+                    p_liq = vol.find('ns:pesoL', ns)
+                    p_bru = vol.find('ns:pesoB', ns)
+                    if p_liq is not None: peso_liquido = p_liq.text
+                    if p_bru is not None: peso_bruto = p_bru.text
+            
+            # Itens
+            itens = infNFe.findall('ns:det', ns)
+            for item in itens:
+                prod = item.find('ns:prod', ns)
+                nome_produto = prod.find('ns:xProd', ns).text
+                quantidade = float(prod.find('ns:qCom', ns).text)
+                valor_prod = float(prod.find('ns:vProd', ns).text)
+                
+                imposto = item.find('ns:imposto', ns)
+                valor_icms = 0.0
+                valor_ipi = 0.0
+                if imposto is not None:
+                    icms = imposto.find('.//ns:vICMS', ns)
+                    ipi = imposto.find('.//ns:vIPI', ns)
+                    if icms is not None: valor_icms = float(icms.text)
+                    if ipi is not None: valor_ipi = float(ipi.text)
+                
+                dados_novos.append({
+                    "Número da Nota": num_nota,
+                    "Produto": nome_produto,
+                    "Quantidade": quantidade,
+                    "Valor": valor_prod,
+                    "ICMS": valor_icms,
+                    "IPI": valor_ipi,
+                    "Peso Líquido": peso_liquido,
+                    "Peso Bruto": peso_bruto
+                })
+        except Exception as e:
+            st.error(f"Erro no arquivo {arquivo.name}: {e}")
+
+    if dados_novos:
+        df_novos_arquivos = pd.DataFrame(dados_novos)
+        # Juntar o histórico com os novos dados
+        df_consolidado = pd.concat([df_historico, df_novos_arquivos], ignore_index=True)
+        
+        with st.spinner("Salvando e atualizando banco de dados..."):
+            sucesso = salvar_planilha_github(df_consolidado, sha_atual)
+            if sucesso:
+                st.success(f"Sucesso! {len(df_novos_arquivos)} itens adicionados à planilha mãe.")
+                if notas_ignoradas > 0:
+                    st.warning(f"{notas_ignoradas} nota(s) foram ignoradas por já existirem no histórico.")
+                st.rerun() # Atualiza a tela para mostrar a tabela nova
+            else:
+                st.error("Erro ao salvar os dados no GitHub. Verifique o Token.")
+
+# Botão para baixar o Excel acumulado completo
+if not df_historico.empty:
+    buffer_baixar = io.BytesIO()
+    with pd.ExcelWriter(buffer_baixar, engine='openpyxl') as writer:
+        df_historico.to_excel(writer, index=False)
+    buffer_baixar.seek(0)
+    
+    st.download_button(
+        label="📥 Baixar Planilha Mãe Completa (Excel)",
+        data=buffer_baixar,
+        file_name="CONSOLIDADO_NOTAS_GERAL.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
