@@ -16,7 +16,7 @@ GITHUB_REPO = "kaykebruno59-sketch/rpa-nfe"
 FILE_PATH = "planilha_acumulada.xlsx"
 BRANCH = "principal"
 
-# Recuperar o Token que salvamos no Secrets
+# Recuperar o Token salvo no Secrets
 if "GITHUB_TOKEN" not in st.secrets:
     st.error("Erro: O GITHUB_TOKEN não foi configurado no menu Secrets do Streamlit.")
     st.stop()
@@ -25,20 +25,26 @@ TOKEN = st.secrets["GITHUB_TOKEN"]
 headers = {"Authorization": f"token {TOKEN}"}
 url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FILE_PATH}?ref={BRANCH}"
 
+# Colunas padrão do nosso banco de dados
+COLUNAS = ["Número da Nota", "Produto", "Quantidade", "Valor", "ICMS", "IPI", "Peso Líquido", "Peso Bruto"]
+
 # --- FUNÇÃO PARA BUSCAR A PLANILHA EXISTENTE NO GITHUB ---
 def buscar_planilha_github():
-    resposta = requests.get(url, headers=headers)
-    if resposta.status_code == 200:
-        conteudo_json = resposta.json()
-        conteudo_base64 = conteudo_json["content"]
-        sha = conteudo_json["sha"]
-        dados_binarios = base64.b64decode(conteudo_base64)
-        df = pd.read_excel(io.BytesIO(dados_binarios))
-        return df, sha
-    else:
-        # Se o arquivo não existir ainda, cria um DataFrame vazio com as colunas
-        columns = ["Número da Nota", "Produto", "Quantidade", "Valor", "ICMS", "IPI", "Peso Líquido", "Peso Bruto"]
-        return pd.DataFrame(columns=columns), None
+    try:
+        resposta = requests.get(url, headers=headers)
+        if resposta.status_code == 200:
+            conteudo_json = resposta.json()
+            conteudo_base64 = conteudo_json["content"]
+            sha = conteudo_json["sha"]
+            dados_binarios = base64.b64decode(conteudo_base64)
+            # Tenta ler o Excel, se falhar (por estar em branco), cria um novo
+            df = pd.read_excel(io.BytesIO(dados_binarios))
+            return df, sha
+        else:
+            return pd.DataFrame(columns=COLUNAS), None
+    except Exception:
+        # Se der qualquer erro de leitura (arquivo corrompido ou em branco), recomeça do zero de forma segura
+        return pd.DataFrame(columns=COLUNAS), None
 
 # --- FUNÇÃO PARA SALVAR A PLANILHA ATUALIZADA NO GITHUB ---
 def salvar_planilha_github(df_novo, sha_antigo):
@@ -59,11 +65,11 @@ def salvar_planilha_github(df_novo, sha_antigo):
     resposta = requests.put(url, headers=headers, data=json.dumps(dados_envio))
     return resposta.status_code in [200, 201]
 
-# Carregar o histórico atual
+# Carregar o histórico atual de forma segura
 df_historico, sha_atual = buscar_planilha_github()
 
-# Mostrar o histórico atual na tela
-if not df_historico.empty:
+# Mostrar o histórico atual na tela (se houver dados válidos)
+if not df_historico.empty and len(df_historico.columns) == len(COLUNAS):
     st.subheader("📋 Histórico de Notas Já Salvas")
     st.dataframe(df_historico)
 
@@ -74,8 +80,10 @@ if arquivos_xml:
     dados_novos = []
     notas_ignoradas = 0
     
-    # Pegar lista de notas que já existem para não duplicar
-    notas_existentes = df_historico["Número da Nota"].astype(str).tolist()
+    # Pegar lista de notas que já existem para não duplicar (evita erro se o df estiver vazio)
+    notas_existentes = []
+    if "Número da Nota" in df_historico.columns:
+        notas_existentes = df_historico["Número da Nota"].astype(str).tolist()
     
     for arquivo in arquivos_xml:
         try:
@@ -138,8 +146,12 @@ if arquivos_xml:
 
     if dados_novos:
         df_novos_arquivos = pd.DataFrame(dados_novos)
-        # Juntar o histórico com os novos dados
-        df_consolidado = pd.concat([df_historico, df_novos_arquivos], ignore_index=True)
+        
+        # Garante que o histórico tem as colunas certas antes de juntar
+        if df_historico.empty or len(df_historico.columns) != len(COLUNAS):
+            df_consolidado = df_novos_arquivos
+        else:
+            df_consolidado = pd.concat([df_historico, df_novos_arquivos], ignore_index=True)
         
         with st.spinner("Salvando e atualizando banco de dados..."):
             sucesso = salvar_planilha_github(df_consolidado, sha_atual)
@@ -147,12 +159,12 @@ if arquivos_xml:
                 st.success(f"Sucesso! {len(df_novos_arquivos)} itens adicionados à planilha mãe.")
                 if notas_ignoradas > 0:
                     st.warning(f"{notas_ignoradas} nota(s) foram ignoradas por já existirem no histórico.")
-                st.rerun() # Atualiza a tela para mostrar a tabela nova
+                st.rerun()
             else:
-                st.error("Erro ao salvar os dados no GitHub. Verifique o Token.")
+                st.error("Erro ao salvar os dados no GitHub. Verifique as permissões do seu Token.")
 
-# Botão para baixar o Excel acumulado completo
-if not df_historico.empty:
+# Botão para baixar o Excel acumulado completo (se houver dados)
+if not df_historico.empty and len(df_historico.columns) == len(COLUNAS):
     buffer_baixar = io.BytesIO()
     with pd.ExcelWriter(buffer_baixar, engine='openpyxl') as writer:
         df_historico.to_excel(writer, index=False)
