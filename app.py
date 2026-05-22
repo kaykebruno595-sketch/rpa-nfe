@@ -9,7 +9,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
 st.title("📦 Conversor de XML para Planilha Padrão")
-st.write("Arraste os seus arquivos XML aqui para gerar as planilhas individuais com identificação de Remetente.")
+st.write("Arraste os seus arquivos XML aqui para gerar as planilhas individuais com Fornecedor e Cidade.")
 
 # Campo para fazer upload dos XMLs
 arquivos_xml = st.file_uploader("Escolha os arquivos XML da nota", type=["xml"], accept_multiple_files=True)
@@ -29,33 +29,46 @@ if arquivos_xml:
             ide = infNFe.find('ns:ide', ns)
             num_nota = ide.find('ns:nNF', ns).text if ide is not None else "N/A"
             
-            # --- IDENTIFICAÇÃO DO REMETENTE VIA XML ---
-            remetente_final = "Outros / Não Identificado"
+            # --- COLETA DO FORNECEDOR E IDENTIFICAÇÃO DA CIDADE ---
+            fornecedor_final = "Não Identificado"
+            cidade_final = "Outros / Não Encontrado"
+            
             emit = infNFe.find('ns:emit', ns)
             if emit is not None:
                 xNome = emit.find('ns:xNome', ns)
                 xFant = emit.find('ns:xFant', ns)
                 
-                # Junta o nome e fantasia para fazer a busca textual
-                texto_remetente = ""
-                if xNome is not None: texto_remetente += xNome.text.upper()
-                if xFant is not None: texto_remetente += " " + xFant.text.upper()
+                if xNome is not None:
+                    fornecedor_final = xNome.text
+                elif xFant is not None:
+                    fornecedor_final = xFant.text
                 
-                # Regras de checagem que você pediu
-                if "POSITIVE" in texto_remetente:
-                    remetente_final = "Positive"
-                elif "ARAMA" in texto_remetente:
-                    remetente_final = "Arama"
-                elif "LONDRINA" in texto_remetente:
-                    remetente_final = "Londrina"
-                elif "SANTA LUZIA" in texto_remetente:
-                    remetente_final = "Santa Luzia"
-                elif "DIADEMA" in texto_remetente:
-                    remetente_final = "Diadema"
-                elif xNome is not None:
-                    # Caso não seja nenhum dos 5, ele coloca o nome que achar no XML para não ficar em branco
-                    remetente_final = xNome.text
-            
+                # Coleta dados de endereço do XML para ajudar na busca da cidade
+                enderEmit = emit.find('ns:enderEmit', ns)
+                xMun = enderEmit.find('ns:xMun', ns).text.upper() if enderEmit is not None and enderEmit.find('ns:xMun', ns) is not None else ""
+                
+                # Texto unificado para busca de palavras-chave (Nome + Fantasia + Cidade do XML)
+                texto_busca = f"{fornecedor_final.upper()} {xMun}"
+                if xFant is not None: 
+                    texto_busca += f" {xFant.text.upper()}"
+                
+                # Regras de checagem para a nova coluna de Cidade/Município
+                if "POSITIVE" in texto_busca:
+                    cidade_final = "Positive"
+                elif "SANTA LUZIA" in texto_busca:
+                    cidade_final = "Santa Luzia"
+                elif "ARAMA" in texto_busca:
+                    cidade_final = "Arama"
+                elif "NATAL" in texto_busca:
+                    cidade_final = "Natal"
+                elif "LONDRINA" in texto_busca:
+                    cidade_final = "Londrina"
+                elif "DIADEMA" in texto_busca:
+                    cidade_final = "Diadema"
+                elif xMun != "":
+                    # Caso não seja nenhuma das 6 específicas, coloca o nome da cidade que veio no XML
+                    cidade_final = xMun.title()
+
             # Coleta de Pesos (Dados Fiscais)
             transp = infNFe.find('ns:transp', ns)
             peso_liquido = 0.0
@@ -103,7 +116,8 @@ if arquivos_xml:
                         valor_ipi_penc = f"{int(float(ipi_detalhe.text))}%"
                 
                 lista_produtos.append({
-                    "REMETENTE": remetente_final,
+                    "FORNECEDOR": fornecedor_final,
+                    "CIDADE/MUNICÍPIO": cidade_final,
                     "CODIGO": codigo,
                     "DESCRIÇÃO": nome_produto,
                     "NOTA FISCAL": num_nota,
@@ -139,16 +153,16 @@ if arquivos_xml:
                 bottom=Side(style='thin', color='D3D3D3')
             )
             
-            # 1. Seção de Cabeçalho Superior - DADOS MATERIAIS (Expandido para 10 colunas: A até J)
-            ws.merge_cells("A1:J1")
+            # 1. Seção de Cabeçalho Superior - DADOS MATERIAIS (Expandido para 11 colunas: A até K)
+            ws.merge_cells("A1:K1")
             ws["A1"] = "DADOS MATERIAIS"
             ws["A1"].fill = fill_header
             ws["A1"].font = font_branca_negrito
             ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[1].height = 25
             
-            # 2. Títulos das Colunas (Linha 2 - Nova coluna REMETENTE na posição A)
-            colunas = ["REMETENTE", "CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
+            # 2. Títulos das Colunas (Linha 2 - Adicionado FORNECEDOR em A e CIDADE/MUNICÍPIO em B)
+            colunas = ["FORNECEDOR", "CIDADE/MUNICÍPIO", "CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
             for col_idx, texto_coluna in enumerate(colunas, 1):
                 celula = ws.cell(row=2, column=col_idx, value=texto_coluna)
                 celula.fill = fill_header
@@ -160,21 +174,22 @@ if arquivos_xml:
             # 3. Preenchendo as linhas de produtos (A partir da Linha 3)
             linha_atual = 3
             for prod in lista_produtos:
-                ws.cell(row=linha_atual, column=1, value=prod["REMETENTE"]).alignment = Alignment(horizontal="left")
-                ws.cell(row=linha_atual, column=2, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
-                ws.cell(row=linha_atual, column=3, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
-                ws.cell(row=linha_atual, column=4, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
-                ws.cell(row=linha_atual, column=5, value=prod["UMB"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=1, value=prod["FORNECEDOR"]).alignment = Alignment(horizontal="left")
+                ws.cell(row=linha_atual, column=2, value=prod["CIDADE/MUNICÍPIO"]).alignment = Alignment(horizontal="left")
+                ws.cell(row=linha_atual, column=3, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=4, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
+                ws.cell(row=linha_atual, column=5, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
                 
                 # Formatação de números
-                ws.cell(row=linha_atual, column=6, value=prod["QTDE"]).number_format = '#,##0.00'
-                ws.cell(row=linha_atual, column=7, value=prod["VLR. UNT."]).number_format = 'R$ #,##0.00'
-                ws.cell(row=linha_atual, column=8, value=prod["VLR. TT."]).number_format = 'R$ #,##0.00'
+                ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
+                ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = 'R$ #,##0.00'
+                ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."]).number_format = 'R$ #,##0.00'
                 
-                ws.cell(row=linha_atual, column=9, value=prod["ICMS"]).alignment = Alignment(horizontal="center")
-                ws.cell(row=linha_atual, column=10, value=prod["IPI"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=10, value=prod["ICMS"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=11, value=prod["IPI"]).alignment = Alignment(horizontal="center")
                 
-                for c in range(1, 11):
+                for c in range(1, 12):
                     ws.cell(row=linha_atual, column=c).font = font_normal
                     ws.cell(row=linha_atual, column=c).border = border_fina
                 
@@ -229,9 +244,10 @@ if arquivos_xml:
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
             
-            # Forçar larguras bonitas para colunas de texto maiores
-            ws.column_dimensions['A'].width = 20  # Remetente
-            ws.column_dimensions['C'].width = 45  # Descrição
+            # Forçar larguras perfeitas para colunas de texto maiores
+            ws.column_dimensions['A'].width = 30  # Fornecedor (Razão Social)
+            ws.column_dimensions['B'].width = 20  # Cidade/Município
+            ws.column_dimensions['D'].width = 45  # Descrição do Produto
             
             # 6. Salvar em memória e gerar botão de Download
             buffer = io.BytesIO()
