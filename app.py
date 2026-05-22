@@ -9,7 +9,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
 st.title("📦 Conversor de XML para Planilha Padrão")
-st.write("Arraste os seus arquivos XML aqui para gerar as planilhas individuais no formato oficial do sistema.")
+st.write("Arraste os seus arquivos XML aqui para gerar as planilhas individuais com identificação de Remetente.")
 
 # Campo para fazer upload dos XMLs
 arquivos_xml = st.file_uploader("Escolha os arquivos XML da nota", type=["xml"], accept_multiple_files=True)
@@ -28,6 +28,33 @@ if arquivos_xml:
                 
             ide = infNFe.find('ns:ide', ns)
             num_nota = ide.find('ns:nNF', ns).text if ide is not None else "N/A"
+            
+            # --- IDENTIFICAÇÃO DO REMETENTE VIA XML ---
+            remetente_final = "Outros / Não Identificado"
+            emit = infNFe.find('ns:emit', ns)
+            if emit is not None:
+                xNome = emit.find('ns:xNome', ns)
+                xFant = emit.find('ns:xFant', ns)
+                
+                # Junta o nome e fantasia para fazer a busca textual
+                texto_remetente = ""
+                if xNome is not None: texto_remetente += xNome.text.upper()
+                if xFant is not None: texto_remetente += " " + xFant.text.upper()
+                
+                # Regras de checagem que você pediu
+                if "POSITIVE" in texto_remetente:
+                    remetente_final = "Positive"
+                elif "ARAMA" in texto_remetente:
+                    remetente_final = "Arama"
+                elif "LONDRINA" in texto_remetente:
+                    remetente_final = "Londrina"
+                elif "SANTA LUZIA" in texto_remetente:
+                    remetente_final = "Santa Luzia"
+                elif "DIADEMA" in texto_remetente:
+                    remetente_final = "Diadema"
+                elif xNome is not None:
+                    # Caso não seja nenhum dos 5, ele coloca o nome que achar no XML para não ficar em branco
+                    remetente_final = xNome.text
             
             # Coleta de Pesos (Dados Fiscais)
             transp = infNFe.find('ns:transp', ns)
@@ -57,7 +84,7 @@ if arquivos_xml:
                 prod = item.find('ns:prod', ns)
                 codigo = prod.find('ns:cProd', ns).text
                 nome_produto = prod.find('ns:xProd', ns).text
-                umb = prod.find('ns:uCom', ns).text  # Unidade de Medida
+                umb = prod.find('ns:uCom', ns).text  
                 quantidade = float(prod.find('ns:qCom', ns).text)
                 valor_unitario = float(prod.find('ns:vUnCom', ns).text)
                 valor_total_item = float(prod.find('ns:vProd', ns).text)
@@ -67,17 +94,16 @@ if arquivos_xml:
                 valor_ipi_penc = "0%"
                 
                 if imposto is not None:
-                    # Tenta buscar a alíquota em porcentagem do ICMS
                     icms_detalhe = imposto.find('.//ns:pICMS', ns)
                     if icms_detalhe is not None:
                         valor_icms_penc = f"{int(float(icms_detalhe.text))}%"
                         
-                    # Tenta buscar a alíquota em porcentagem do IPI
                     ipi_detalhe = imposto.find('.//ns:pIPI', ns)
                     if ipi_detalhe is not None:
                         valor_ipi_penc = f"{int(float(ipi_detalhe.text))}%"
                 
                 lista_produtos.append({
+                    "REMETENTE": remetente_final,
                     "CODIGO": codigo,
                     "DESCRIÇÃO": nome_produto,
                     "NOTA FISCAL": num_nota,
@@ -89,13 +115,13 @@ if arquivos_xml:
                     "IPI": valor_ipi_penc
                 })
                 
-            # --- CONSTRUÇÃO DA PLANILHA NO EXCEL COM OPENPYXL (DESIGN IDÊNTICO) ---
+            # --- CONSTRUÇÃO DA PLANILHA NO EXCEL COM OPENPYXL ---
             wb = Workbook()
             ws = wb.active
             ws.title = f"NF {num_nota}"
             ws.views.sheetView[0].showGridLines = True
             
-            # Estilos de Cores e Fontes (Azul Escuro do seu sistema)
+            # Estilos de Cores e Fontes
             cor_azul_escuro = "1B365D"
             cor_azul_claro = "F0F4F8"
             
@@ -113,16 +139,16 @@ if arquivos_xml:
                 bottom=Side(style='thin', color='D3D3D3')
             )
             
-            # 1. Seção de Cabeçalho Superior - DADOS MATERIAIS
-            ws.merge_cells("A1:I1")
+            # 1. Seção de Cabeçalho Superior - DADOS MATERIAIS (Expandido para 10 colunas: A até J)
+            ws.merge_cells("A1:J1")
             ws["A1"] = "DADOS MATERIAIS"
             ws["A1"].fill = fill_header
             ws["A1"].font = font_branca_negrito
             ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[1].height = 25
             
-            # 2. Títulos das Colunas (Linha 2)
-            colunas = ["CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
+            # 2. Títulos das Colunas (Linha 2 - Nova coluna REMETENTE na posição A)
+            colunas = ["REMETENTE", "CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
             for col_idx, texto_coluna in enumerate(colunas, 1):
                 celula = ws.cell(row=2, column=col_idx, value=texto_coluna)
                 celula.fill = fill_header
@@ -134,20 +160,21 @@ if arquivos_xml:
             # 3. Preenchendo as linhas de produtos (A partir da Linha 3)
             linha_atual = 3
             for prod in lista_produtos:
-                ws.cell(row=linha_atual, column=1, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
-                ws.cell(row=linha_atual, column=2, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
-                ws.cell(row=linha_atual, column=3, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
-                ws.cell(row=linha_atual, column=4, value=prod["UMB"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=1, value=prod["REMETENTE"]).alignment = Alignment(horizontal="left")
+                ws.cell(row=linha_atual, column=2, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=3, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
+                ws.cell(row=linha_atual, column=4, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=5, value=prod["UMB"]).alignment = Alignment(horizontal="center")
                 
                 # Formatação de números
-                ws.cell(row=linha_atual, column=5, value=prod["QTDE"]).number_format = '#,##0.00'
-                ws.cell(row=linha_atual, column=6, value=prod["VLR. UNT."]).number_format = 'R$ #,##0.00'
-                ws.cell(row=linha_atual, column=7, value=prod["VLR. TT."]).number_format = 'R$ #,##0.00'
+                ws.cell(row=linha_atual, column=6, value=prod["QTDE"]).number_format = '#,##0.00'
+                ws.cell(row=linha_atual, column=7, value=prod["VLR. UNT."]).number_format = 'R$ #,##0.00'
+                ws.cell(row=linha_atual, column=8, value=prod["VLR. TT."]).number_format = 'R$ #,##0.00'
                 
-                ws.cell(row=linha_atual, column=8, value=prod["ICMS"]).alignment = Alignment(horizontal="center")
-                ws.cell(row=linha_atual, column=9, value=prod["IPI"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=9, value=prod["ICMS"]).alignment = Alignment(horizontal="center")
+                ws.cell(row=linha_atual, column=10, value=prod["IPI"]).alignment = Alignment(horizontal="center")
                 
-                for c in range(1, 10):
+                for c in range(1, 11):
                     ws.cell(row=linha_atual, column=c).font = font_normal
                     ws.cell(row=linha_atual, column=c).border = border_fina
                 
@@ -165,7 +192,7 @@ if arquivos_xml:
             ws.row_dimensions[linha_atual].height = 22
             linha_atual += 1
             
-            # Montagem das linhas de Peso e Volume conforme o seu print
+            # Montagem das linhas de Peso e Volume
             dados_fiscais_valores = [
                 ("PESO BRUTO", peso_bruto),
                 ("PESO LÍQUIDO", peso_liquido),
@@ -187,26 +214,26 @@ if arquivos_xml:
                 c_valor.border = border_fina
                 c_valor.alignment = Alignment(horizontal="left")
                 
-                # Aplica bordas nas células mescladas escondidas para não bugar o visual
                 ws.cell(row=linha_atual, column=2).border = border_fina
                 
                 ws.row_dimensions[linha_atual].height = 18
                 linha_atual += 1
                 
-            # Ajuste Automático da Largura das Colunas para o texto não cortar
+            # Ajuste Automático da Largura das Colunas
             for col in ws.columns:
                 max_len = 0
                 col_letter = get_column_letter(col[0].column)
                 for cell in col:
-                    if cell.row == 1: continue  # Pula a linha unificada do título principal
+                    if cell.row == 1: continue  
                     if cell.value:
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
             
-            # Alteração específica para a coluna da descrição ficar bem larga e bonita
-            ws.column_dimensions['B'].width = 45
+            # Forçar larguras bonitas para colunas de texto maiores
+            ws.column_dimensions['A'].width = 20  # Remetente
+            ws.column_dimensions['C'].width = 45  # Descrição
             
-            # 6. Salvar em memória e gerar botão de Download para este arquivo específico
+            # 6. Salvar em memória e gerar botão de Download
             buffer = io.BytesIO()
             wb.save(buffer)
             buffer.seek(0)
