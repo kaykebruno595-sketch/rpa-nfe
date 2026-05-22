@@ -8,7 +8,7 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
-st.title("📦 Conversor de XML para Planilha Padrão")
+st.title("📦 RPA- Conversor de XML")
 st.write("Arraste os seus arquivos XML aqui para gerar as planilhas individuais com Fornecedor e Cidade.")
 
 # Campo para fazer upload dos XMLs
