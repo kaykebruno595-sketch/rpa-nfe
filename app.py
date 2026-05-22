@@ -2,13 +2,14 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import pandas as pd
 import io
+import re
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
-st.title("📦 RPA- Conversor de XML")
+st.title("📦 Conversor de XML para Planilha Padrão")
 st.write("Arraste os seus arquivos XML aqui para gerar as planilhas individuais com Fornecedor e Cidade.")
 
 # Campo para fazer upload dos XMLs
@@ -40,7 +41,7 @@ if arquivos_xml:
                 elif xFant is not None:
                     fornecedor_final = xFant.text
 
-            # --- IDENTIFICAÇÃO DA CIDADE CORRETA (DIRETO NO ENDERDEST DO SEU PRINT) ---
+            # --- IDENTIFICAÇÃO DA CIDADE COM A TRAVA DE CARIACICA ---
             cidade_final = "Outros / Não Encontrado"
             dest = infNFe.find('ns:dest', ns)
             if dest is not None:
@@ -50,8 +51,9 @@ if arquivos_xml:
                     if xMun_node is not None:
                         cidade_xml_bruta = xMun_node.text.upper()
                         
-                        # Suas travas de validação baseadas na cidade do destinatário
-                        if "NATAL" in cidade_xml_bruta:
+                        if "CARIACICA" in cidade_xml_bruta:
+                            cidade_final = "Positive CO"
+                        elif "NATAL" in cidade_xml_bruta:
                             cidade_final = "Natal"
                         elif "POSITIVE" in cidade_xml_bruta:
                             cidade_final = "Positive"
@@ -126,7 +128,7 @@ if arquivos_xml:
                     "IPI": valor_ipi_penc
                 })
                 
-            # --- CONSTRUÇÃO DA PLANILHA NO EXCEL COM OPENPYXL ---
+            # --- CONSTRUÇÃO DA PLANILHA NO EXCEL ---
             wb = Workbook()
             ws = wb.active
             ws.title = f"NF {num_nota}"
@@ -150,7 +152,7 @@ if arquivos_xml:
                 bottom=Side(style='thin', color='D3D3D3')
             )
             
-            # 1. Seção de Cabeçalho Superior - DADOS MATERIAIS
+            # 1. Seção de Cabeçalho Superior
             ws.merge_cells("A1:K1")
             ws["A1"] = "DADOS MATERIAIS"
             ws["A1"].fill = fill_header
@@ -158,7 +160,7 @@ if arquivos_xml:
             ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[1].height = 25
             
-            # 2. Títulos das Colunas (Linha 2)
+            # 2. Títulos das Colunas
             colunas = ["FORNECEDOR", "CIDADE/MUNICÍPIO", "CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
             for col_idx, texto_coluna in enumerate(colunas, 1):
                 celula = ws.cell(row=2, column=col_idx, value=texto_coluna)
@@ -168,7 +170,7 @@ if arquivos_xml:
                 celula.border = border_fina
             ws.row_dimensions[2].height = 22
             
-            # 3. Preenchendo as linhas de produtos (A partir da Linha 3)
+            # 3. Preenchendo as linhas de produtos
             linha_atual = 3
             for prod in lista_produtos:
                 ws.cell(row=linha_atual, column=1, value=prod["FORNECEDOR"]).alignment = Alignment(horizontal="left")
@@ -178,7 +180,7 @@ if arquivos_xml:
                 ws.cell(row=linha_atual, column=5, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
                 ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
                 
-                # Formatação de números
+                # Formatação numérica
                 ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
                 ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = 'R$ #,##0.00'
                 ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."]).number_format = 'R$ #,##0.00'
@@ -241,20 +243,23 @@ if arquivos_xml:
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
             
-            # Forçar larguras ideais
             ws.column_dimensions['A'].width = 32  # Fornecedor
-            ws.column_dimensions['B'].width = 22  # Cidade/Município (Alvo corrigido)
+            ws.column_dimensions['B'].width = 22  # Cidade/Município
             ws.column_dimensions['D'].width = 45  # Descrição
             
-            # 6. Salvar em memória e gerar botão de Download
+            # 6. Salvar em memória
             buffer = io.BytesIO()
             wb.save(buffer)
             buffer.seek(0)
             
+            # Remove caracteres estranhos do nome do fornecedor para não quebrar o arquivo no Windows/Excel
+            fornecedor_limpo = re.sub(r'[\\/*?:"<>|]', "", fornecedor_final).strip()
+            
+            # --- ATUALIZAÇÃO NO LAYOUT DO BOTÃO DE DOWNLOAD ---
             st.download_button(
-                label=f"📥 Baixar Planilha - Nota {num_nota}",
+                label=f"📥 Baixar nota {num_nota} - {fornecedor_limpo}",
                 data=buffer,
-                file_name=f"PLANILHA_NOTA_{num_nota}.xlsx",
+                file_name=f"PLANILHA_NOTA_{num_nota}_{fornecedor_limpo}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
             
