@@ -29,45 +29,42 @@ if arquivos_xml:
             ide = infNFe.find('ns:ide', ns)
             num_nota = ide.find('ns:nNF', ns).text if ide is not None else "N/A"
             
-            # --- COLETA DO FORNECEDOR E IDENTIFICAÇÃO DA CIDADE ---
+            # --- COLETA DO FORNECEDOR (RAZÃO SOCIAL DO EMITENTE) ---
             fornecedor_final = "Não Identificado"
-            cidade_final = "Outros / Não Encontrado"
-            
             emit = infNFe.find('ns:emit', ns)
             if emit is not None:
                 xNome = emit.find('ns:xNome', ns)
                 xFant = emit.find('ns:xFant', ns)
-                
                 if xNome is not None:
                     fornecedor_final = xNome.text
                 elif xFant is not None:
                     fornecedor_final = xFant.text
-                
-                # Coleta dados de endereço do XML para ajudar na busca da cidade
-                enderEmit = emit.find('ns:enderEmit', ns)
-                xMun = enderEmit.find('ns:xMun', ns).text.upper() if enderEmit is not None and enderEmit.find('ns:xMun', ns) is not None else ""
-                
-                # Texto unificado para busca de palavras-chave (Nome + Fantasia + Cidade do XML)
-                texto_busca = f"{fornecedor_final.upper()} {xMun}"
-                if xFant is not None: 
-                    texto_busca += f" {xFant.text.upper()}"
-                
-                # Regras de checagem para a nova coluna de Cidade/Município
-                if "POSITIVE" in texto_busca:
-                    cidade_final = "Positive"
-                elif "SANTA LUZIA" in texto_busca:
-                    cidade_final = "Santa Luzia"
-                elif "ARAMA" in texto_busca:
-                    cidade_final = "Arama"
-                elif "NATAL" in texto_busca:
-                    cidade_final = "Natal"
-                elif "LONDRINA" in texto_busca:
-                    cidade_final = "Londrina"
-                elif "DIADEMA" in texto_busca:
-                    cidade_final = "Diadema"
-                elif xMun != "":
-                    # Caso não seja nenhuma das 6 específicas, coloca o nome da cidade que veio no XML
-                    cidade_final = xMun.title()
+
+            # --- IDENTIFICAÇÃO DA CIDADE CORRETA (DIRETO NO ENDERDEST DO SEU PRINT) ---
+            cidade_final = "Outros / Não Encontrado"
+            dest = infNFe.find('ns:dest', ns)
+            if dest is not None:
+                enderDest = dest.find('ns:enderDest', ns)
+                if enderDest is not None:
+                    xMun_node = enderDest.find('ns:xMun', ns)
+                    if xMun_node is not None:
+                        cidade_xml_bruta = xMun_node.text.upper()
+                        
+                        # Suas travas de validação baseadas na cidade do destinatário
+                        if "NATAL" in cidade_xml_bruta:
+                            cidade_final = "Natal"
+                        elif "POSITIVE" in cidade_xml_bruta:
+                            cidade_final = "Positive"
+                        elif "SANTA LUZIA" in cidade_xml_bruta:
+                            cidade_final = "Santa Luzia"
+                        elif "ARAMA" in cidade_xml_bruta:
+                            cidade_final = "Arama"
+                        elif "LONDRINA" in cidade_xml_bruta:
+                            cidade_final = "Londrina"
+                        elif "DIADEMA" in cidade_xml_bruta:
+                            cidade_final = "Diadema"
+                        else:
+                            cidade_final = cidade_xml_bruta.title()
 
             # Coleta de Pesos (Dados Fiscais)
             transp = infNFe.find('ns:transp', ns)
@@ -153,7 +150,7 @@ if arquivos_xml:
                 bottom=Side(style='thin', color='D3D3D3')
             )
             
-            # 1. Seção de Cabeçalho Superior - DADOS MATERIAIS (Expandido para 11 colunas: A até K)
+            # 1. Seção de Cabeçalho Superior - DADOS MATERIAIS
             ws.merge_cells("A1:K1")
             ws["A1"] = "DADOS MATERIAIS"
             ws["A1"].fill = fill_header
@@ -161,7 +158,7 @@ if arquivos_xml:
             ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
             ws.row_dimensions[1].height = 25
             
-            # 2. Títulos das Colunas (Linha 2 - Adicionado FORNECEDOR em A e CIDADE/MUNICÍPIO em B)
+            # 2. Títulos das Colunas (Linha 2)
             colunas = ["FORNECEDOR", "CIDADE/MUNICÍPIO", "CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
             for col_idx, texto_coluna in enumerate(colunas, 1):
                 celula = ws.cell(row=2, column=col_idx, value=texto_coluna)
@@ -244,10 +241,10 @@ if arquivos_xml:
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
             
-            # Forçar larguras perfeitas para colunas de texto maiores
-            ws.column_dimensions['A'].width = 30  # Fornecedor (Razão Social)
-            ws.column_dimensions['B'].width = 20  # Cidade/Município
-            ws.column_dimensions['D'].width = 45  # Descrição do Produto
+            # Forçar larguras ideais
+            ws.column_dimensions['A'].width = 32  # Fornecedor
+            ws.column_dimensions['B'].width = 22  # Cidade/Município (Alvo corrigido)
+            ws.column_dimensions['D'].width = 45  # Descrição
             
             # 6. Salvar em memória e gerar botão de Download
             buffer = io.BytesIO()
