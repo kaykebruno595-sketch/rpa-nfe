@@ -10,7 +10,7 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
-st.title("📦 Conversor de XML com Dupla Validação Personalizada")
+st.title("📦 RPA - Extrator de Xml Copacker")
 st.write("Arraste os arquivos XML. Validação por as colunas da Planilha Base: `nF`, `emitNome` e `id_material`.")
 
 # --- CARREGAMENTO AUTOMÁTICO DA PLANILHA BASE DO GITHUB ---
