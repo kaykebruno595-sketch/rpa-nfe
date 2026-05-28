@@ -10,7 +10,7 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
 st.title("📦 RPA Conversor de XML Copacker")
-st.write("Atualize a planilha base e converta seus XMLs direto por aqui, sem precisar do GitHub!")
+st.write("Atualize a planilha base e converta seus XMLs direto por aqui!")
 
 # --- FUNÇÃO PARA LIMPEZA EXTREMA DE TEXTO ---
 def limpar_texto_comparacao(texto):
@@ -38,7 +38,7 @@ if arquivo_base_upload is not None:
         st.success("✅ Planilha Base carregada e ativa!")
         
         # --- PAINEL DE CERTEZA VISUAL ---
-        st.subheader("👀 Dados Ativos (Últimas 5 linhas):")
+        st.subheader("👀 Dados Ativos no Momento (Últimas 5 linhas):")
         col_nf = next((c for c in df_base.columns if "NF" in c), None)
         col_emit = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
         col_mat = next((c for c in df_base.columns if "MAT" in c), None)
@@ -123,7 +123,7 @@ if arquivos_xml:
                         if esp is not None: especie_volume = esp.text
                         if q_vol is not None: qtde_volume = int(q_vol.text)
 
-                # --- CRUSAMENTO DE DADOS COM A PLANILHA CARREGADA ---
+                # --- CRUZAMENTO DE DADOS COM A PLANILHA CARREGADA ---
                 codigo_substituto = None
                 col_nf_base = next((c for c in df_base.columns if "NF" in c), None)
                 col_emit_base = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
@@ -159,13 +159,14 @@ if arquivos_xml:
                     valor_unitario = float(prod.find('ns:vUnCom', ns).text)
                     valor_total_item = float(prod.find('ns:vProd', ns).text)
                     
+                    # Captura os impostos como números reais/decimais para formatação posterior
                     imposto = item.find('ns:imposto', ns)
-                    valor_icms_penc, valor_ipi_penc = "0%", "0%"
+                    valor_icms_num, valor_ipi_num = 0.0, 0.0
                     if imposto is not None:
                         icms_detalhe = imposto.find('.//ns:pICMS', ns)
-                        if icms_detalhe is not None: valor_icms_penc = f"{int(float(icms_detalhe.text))}%"
+                        if icms_detalhe is not None: valor_icms_num = float(icms_detalhe.text)
                         ipi_detalhe = imposto.find('.//ns:pIPI', ns)
-                        if ipi_detalhe is not None: valor_ipi_penc = f"{int(float(ipi_detalhe.text))}%"
+                        if ipi_detalhe is not None: valor_ipi_num = float(ipi_detalhe.text)
                     
                     lista_produtos.append({
                         "FORNECEDOR": fornecedor_final,
@@ -177,8 +178,8 @@ if arquivos_xml:
                         "QTDE": quantidade,
                         "VLR. UNT.": valor_unitario,
                         "VLR. TT.": valor_total_item,
-                        "ICMS": valor_icms_penc,
-                        "IPI": valor_ipi_penc
+                        "ICMS": valor_icms_num,
+                        "IPI": valor_ipi_num
                     })
 
                 # --- FORMATAÇÃO DO ARQUIVO EXCEL FINAL ---
@@ -224,12 +225,21 @@ if arquivos_xml:
                     ws.cell(row=linha_atual, column=5, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
                     ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
                     
+                    # Formatação numérica pura (sem siglas de moedas ou símbolos de porcentagem)
                     ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
-                    ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = 'R$ #,##0.00'
-                    ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."]).number_format = 'R$ #,##0.00'
                     
-                    ws.cell(row=linha_atual, column=10, value=str(prod["ICMS"])).alignment = Alignment(horizontal="center")
-                    ws.cell(row=linha_atual, column=11, value=str(prod["IPI"])).alignment = Alignment(horizontal="center")
+                    # Alteração solicitada: Removido 'R$' e configurado com 2 casas decimais
+                    ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = '#,##0.00'
+                    ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."]).number_format = '#,##0.00'
+                    
+                    # Alteração solicitada: Removido '%' e configurado com 2 casas decimais
+                    celula_icms = ws.cell(row=linha_atual, column=10, value=prod["ICMS"])
+                    celula_icms.number_format = '#,##0.00'
+                    celula_icms.alignment = Alignment(horizontal="center")
+                    
+                    celula_ipi = ws.cell(row=linha_atual, column=11, value=prod["IPI"])
+                    celula_ipi.number_format = '#,##0.00'
+                    celula_ipi.alignment = Alignment(horizontal="center")
                     
                     for c in range(1, 12):
                         ws.cell(row=linha_atual, column=c).font = font_normal
