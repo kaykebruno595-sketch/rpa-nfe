@@ -38,7 +38,7 @@ if os.path.exists(nome_arquivo_base):
         # Padroniza os nomes das colunas
         df_base.columns = [str(col).strip().upper() for col in df_base.columns]
         
-        st.success("✅ Planilha Base carregada com sucesso do repositório GitHub!")
+        st.success("✅ Planilha Base carregada com sucesso!")
         
         # --- PAINEL DE CERTEZA VISUAL ---
         st.subheader("👀 Monitor da Planilha Base")
