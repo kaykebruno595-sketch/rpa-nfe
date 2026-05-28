@@ -10,7 +10,7 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
-st.title("📦 Conversor de XML com Dupla Validação (Nota + Fornecedor)")
+st.title("📦 Extrator Xml Copacker")
 
 # --- FUNÇÃO PARA LIMPEZA EXTREMA DE TEXTO (EVITAR ERROS DE MATCH) ---
 def limpar_texto_comparacao(texto):
