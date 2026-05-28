@@ -41,8 +41,8 @@ if os.path.exists(nome_arquivo_base):
         st.success("✅ Planilha Base carregada com sucesso do repositório GitHub!")
         
         # --- PAINEL DE CERTEZA VISUAL ---
-        st.subheader("👀 Monitor da Planilha Base Ativa")
-        st.write("Confira abaixo os últimos dados que o sistema acabou de ler do GitHub (Últimas 5 linhas):")
+        st.subheader("👀 Monitor da Planilha Base")
+        st.write("Confira abaixo os últimos dados que o sistema acabou de ler (Últimas 5 linhas):")
         
         # Mapeia as colunas reais para exibição amigável
         col_nf = next((c for c in df_base.columns if "NF" in c), None)
