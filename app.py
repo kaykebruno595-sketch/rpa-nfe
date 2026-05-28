@@ -10,8 +10,18 @@ from openpyxl.utils import get_column_letter
 
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
-st.title("📦 RPA - Extrator de Xml Copacker")
-st.write("Arraste os arquivos XML. Validação por as colunas da Planilha Base: `nF`, `emitNome` e `id_material`.")
+st.title("📦 Conversor de XML com Dupla Validação (Nota + Fornecedor)")
+
+# --- FUNÇÃO PARA LIMPEZA EXTREMA DE TEXTO (EVITAR ERROS DE MATCH) ---
+def limpar_texto_comparacao(texto):
+    if pd.isna(texto):
+        return ""
+    txt = str(texto).upper().strip()
+    # Remove acentos e caracteres especiais comuns
+    txt = re.sub(r'[.\-\/]', '', txt)
+    # Remove sufixos empresariais comuns que mudam entre sistemas
+    txt = txt.replace("LTDA", "").replace("S/A", "").replace("SA", "").replace("S.A", "")
+    return "".join(txt.split()) # Remove todos os espaços em branco
 
 # --- CARREGAMENTO AUTOMÁTICO DA PLANILHA BASE DO GITHUB ---
 nome_arquivo_base = "base_transito.xlsx"
@@ -19,16 +29,40 @@ df_base = None
 
 if os.path.exists(nome_arquivo_base):
     try:
-        # Lê a planilha base enviada ao GitHub
-        df_base = pd.read_excel(nome_arquivo_base)
-        # Padroniza os nomes das colunas informadas por você para maiúsculo
+        # Lê a planilha base (tenta pegar a aba 'Trânsito', se não achar pega a primeira)
+        try:
+            df_base = pd.read_excel(nome_arquivo_base, sheet_name="Trânsito")
+        except:
+            df_base = pd.read_excel(nome_arquivo_base, sheet_name=0)
+            
+        # Padroniza os nomes das colunas
         df_base.columns = [str(col).strip().upper() for col in df_base.columns]
-        st.success("✅ Planilha Base 'Trânsito' carregada com sucesso do repositório!")
+        
+        st.success("✅ Planilha Base carregada com sucesso do repositório GitHub!")
+        
+        # --- PAINEL DE CERTEZA VISUAL ---
+        st.subheader("👀 Monitor da Planilha Base Ativa")
+        st.write("Confira abaixo os últimos dados que o sistema acabou de ler do GitHub (Últimas 5 linhas):")
+        
+        # Mapeia as colunas reais para exibição amigável
+        col_nf = next((c for c in df_base.columns if "NF" in c), None)
+        col_emit = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
+        col_mat = next((c for c in df_base.columns if "MAT" in c), None)
+        
+        if col_nf and col_emit and col_mat:
+            df_preview = df_base[[col_nf, col_emit, col_mat]].tail(5)
+            df_preview.columns = ["Nota Fiscal (nF)", "Fornecedor (emitNome)", "Código Certo (id_material)"]
+            st.dataframe(df_preview, use_container_width=True)
+        else:
+            st.warning("⚠️ Suas colunas não estão com os nomes exatos: `nF`, `emitNome` e `id_material`.")
+            st.write("Colunas encontradas na sua planilha:", list(df_base.columns))
+            
     except Exception as e:
         st.error(f"Erro ao ler a planilha base '{nome_arquivo_base}': {e}")
 else:
     st.warning(f"⚠️ Arquivo '{nome_arquivo_base}' não encontrado no repositório. O sistema usará os códigos nativos do XML.")
 
+st.write("---")
 # Campo para fazer upload dos XMLs do dia a dia
 arquivos_xml = st.file_uploader("Escolha os arquivos XML da nota", type=["xml"], accept_multiple_files=True)
 
@@ -46,7 +80,9 @@ if arquivos_xml:
                 
             ide = infNFe.find('ns:ide', ns)
             num_nota = ide.find('ns:nNF', ns).text if ide is not None else "N/A"
-            num_nota_int = int(num_nota) if num_nota.isdigit() else num_nota
+            
+            # Limpeza do número da nota para comparação segura (ex: tira zeros à esquerda)
+            num_nota_limpo = str(int(num_nota)) if num_nota.isdigit() else str(num_nota).strip()
             
             # --- COLETAR FORNECEDOR (XML) ---
             fornecedor_final = "Não Identificado"
@@ -90,24 +126,32 @@ if arquivos_xml:
                     if esp is not None: especie_volume = esp.text
                     if q_vol is not None: qtde_volume = int(q_vol.text)
 
-            # --- BUSCA COM DUPLA VALIDAÇÃO REORGANIZADA (NF + EMITNOME) ---
+            # --- CORREÇÃO CIRÚRGICA: BUSCA INTELIGENTE NA TABELA BASE ---
             codigo_substituto = None
-            if df_base is not None and "NF" in df_base.columns and "EMITNOME" in df_base.columns and "ID_MATERIAL" in df_base.columns:
+            
+            if df_base is not None:
+                # Localiza as colunas ideais independente da caixa alta/baixa
+                col_nf_base = next((c for c in df_base.columns if "NF" in c), None)
+                col_emit_base = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
+                col_mat_base = next((c for c in df_base.columns if "MAT" in c), None)
                 
-                # 1. Filtra primeiro na coluna 'NF' pelo número da nota atual (texto ou número)
-                match_nota = df_base[(df_base["NF"] == num_nota) | (df_base["NF"] == num_nota_int)]
-                
-                if not int(match_nota.shape[0]) == 0:
-                    # 2. Varre as notas encontradas validando a coluna 'EMITNOME' com o fornecedor do XML
-                    fornecedor_xml_upper = fornecedor_final.upper().strip()
+                if col_nf_base and col_emit_base and col_mat_base:
+                    fornecedor_xml_ultra_limpo = limpar_texto_comparacao(fornecedor_final)
                     
-                    for _, linha_base in match_nota.iterrows():
-                        fornecedor_base_upper = str(linha_base["EMITNOME"]).upper().strip()
+                    for _, linha_base in df_base.iterrows():
+                        # Limpa a nota da linha atual da planilha
+                        nota_base_str = str(linha_base[col_nf_base]).split('.')[0].strip()
+                        nota_base_limpa = str(int(nota_base_str)) if nota_base_str.isdigit() else nota_base_str
                         
-                        # Checagem flexível para evitar problemas com abreviações ou LTDA/S.A
-                        if fornecedor_base_upper in fornecedor_xml_upper or fornecedor_xml_upper in fornecedor_base_upper:
-                            codigo_substituto = str(linha_base["ID_MATERIAL"]).strip()
-                            break # Match perfeito, sai do laço
+                        # Se o número da nota bater...
+                        if nota_base_limpa == num_nota_limpo:
+                            # Limpa o fornecedor da linha atual da planilha para comparar
+                            fornecedor_base_ultra_limpo = limpar_texto_comparacao(linha_base[col_emit_base])
+                            
+                            # Se um fornecedor contiver o outro após a limpeza pesada, é o match perfeito!
+                            if fornecedor_base_ultra_limpo in fornecedor_xml_ultra_limpo or proveedores_xml_ultra_limpo in fornecedor_base_ultra_limpo or fornecedor_base_ultra_limpo[:8] in fornecedor_xml_ultra_limpo:
+                                codigo_substituto = str(linha_base[col_mat_base]).strip()
+                                break
 
             # --- COLETAR OS ITENS DO XML APLICANDO AS REGRAS ---
             lista_produtos = []
@@ -116,8 +160,8 @@ if arquivos_xml:
             for item in itens_xml:
                 prod = item.find('ns:prod', ns)
                 
-                # Se encontrou na base com chave dupla, usa o id_material. Senão, mantém o cProd original do XML.
-                if codigo_substituto:
+                # Se a validação cruzada funcionou, aplica o id_material. Senão, mantém o do XML.
+                if codigo_substituto and codigo_substituto.lower() != 'nan':
                     codigo_final_item = codigo_substituto
                 else:
                     codigo_final_item = prod.find('ns:cProd', ns).text
@@ -150,7 +194,7 @@ if arquivos_xml:
                     "IPI": valor_ipi_penc
                 })
 
-            # --- CONSTRUÇÃO DA PLANILHA NO EXCEL COM OPENPYXL ---
+            # --- CONSTRUÇÃO DA PLANILHA NO EXCEL ---
             wb = Workbook()
             ws = wb.active
             ws.title = f"NF {num_nota}"
@@ -255,7 +299,7 @@ if arquivos_xml:
             buffer.seek(0)
             
             fornecedor_limpo = re.sub(r'[\\/*?:"<>|]', "", fornecedor_final).strip()
-            status_origem = "🏷️ [ID Verificado]" if codigo_substituto else "⚠️ [XML Original]"
+            status_origem = "🏷️ [ID Verificado pela Base]" if codigo_substituto else "⚠️ [Nota/Fornecedor Não Encontrado na Base - Usando XML]"
             
             st.download_button(
                 label=f"📥 Baixar nota {num_nota} - {fornecedor_limpo} {status_origem}",
