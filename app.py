@@ -10,14 +10,15 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
 st.title("📦 RPA Conversor de XML Copacker")
-st.write("Atualize a planilha base e converta seus XMLs direto por aqui!")
+st.write("Atualize a planilha base e converta seus XMLs")
 
 # --- FUNÇÃO PARA LIMPEZA EXTREMA DE TEXTO ---
 def limpar_texto_comparacao(texto):
     if pd.isna(texto):
         return ""
     txt = str(texto).upper().strip()
-    txt = re.sub(r'[.\-\/]', '', txt)
+    # Remove acentos comuns e pontuações
+    txt = re.sub(r'[.\-\/\,\_]', '', txt)
     txt = txt.replace("LTDA", "").replace("S/A", "").replace("SA", "").replace("S.A", "")
     return "".join(txt.split())
 
@@ -29,23 +30,27 @@ df_base = None
 
 if arquivo_base_upload is not None:
     try:
-        # Lê a planilha que o usuário acabou de arrastar no site
         df_base = pd.read_excel(arquivo_base_upload, sheet_name=0)
-        
-        # Padroniza os nomes das colunas para Maiúsculo
         df_base.columns = [str(col).strip().upper() for col in df_base.columns]
-        
         st.success("✅ Planilha Base carregada e ativa!")
         
-        # --- PAINEL DE CERTEZA VISUAL ---
         st.subheader("👀 Dados Ativos no Momento (Últimas 5 linhas):")
         col_nf = next((c for c in df_base.columns if "NF" in c), None)
         col_emit = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
         col_mat = next((c for c in df_base.columns if "MAT" in c), None)
+        col_desc_base = next((c for c in df_base.columns if "DESC" in c or "PROD" in c or "MATERIAL" in c), None)
         
         if col_nf and col_emit and col_mat:
-            df_preview = df_base[[col_nf, col_emit, col_mat]].tail(5)
-            df_preview.columns = ["Nota Fiscal (nF)", "Fornecedor (emitNome)", "Código Certo (id_material)"]
+            # Mostra colunas extras se achar a descrição na base
+            colunas_exibicao = [col_nf, col_emit, col_mat]
+            nomes_colunas = ["Nota Fiscal (nF)", "Fornecedor (emitNome)", "Código Certo (id_material)"]
+            
+            if col_desc_base and col_desc_base not in colunas_exibicao:
+                colunas_exibicao.append(col_desc_base)
+                nomes_colunas.append("Descrição na Base")
+                
+            df_preview = df_base[colunas_exibicao].tail(5)
+            df_preview.columns = nomes_colunas
             st.dataframe(df_preview, use_container_width=True)
         else:
             st.warning("⚠️ Atenção: Verifique se a sua planilha possui as colunas `nF`, `emitNome` e `id_material`.")
@@ -123,43 +128,69 @@ if arquivos_xml:
                         if esp is not None: especie_volume = esp.text
                         if q_vol is not None: qtde_volume = int(q_vol.text)
 
-                # --- CRUZAMENTO DE DADOS COM A PLANILHA CARREGADA ---
-                codigo_substituto = None
+                # Mapeia colunas conhecidas da planilha base
                 col_nf_base = next((c for c in df_base.columns if "NF" in c), None)
                 col_emit_base = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
                 col_mat_base = next((c for c in df_base.columns if "MAT" in c), None)
-                
-                if col_nf_base and col_emit_base and col_mat_base:
-                    fornecedor_xml_ultra_limpo = limpar_texto_comparacao(fornecedor_final)
-                    
-                    for _, linha_base in df_base.iterrows():
-                        nota_base_str = str(linha_base[col_nf_base]).split('.')[0].strip()
-                        nota_base_limpa = str(int(nota_base_str)) if nota_base_str.isdigit() else nota_base_str
-                        
-                        if nota_base_limpa == num_nota_limpo:
-                            fornecedor_base_ultra_limpo = limpar_texto_comparacao(linha_base[col_emit_base])
-                            if fornecedor_base_ultra_limpo in fornecedor_xml_ultra_limpo or fornecedor_xml_ultra_limpo in fornecedor_base_ultra_limpo or fornecedor_base_ultra_limpo[:8] in fornecedor_xml_ultra_limpo:
-                                codigo_substituto = str(linha_base[col_mat_base]).strip()
-                                break
+                col_desc_base = next((c for c in df_base.columns if "DESC" in c or "PROD" in c or "MATERIAL" in c), None)
 
-                # --- MONTAGEM DOS ITENS ---
+                # --- MONTAGEM DOS ITENS E BUSCA CIRÚRGICA POR PRODUTO ---
                 lista_produtos = []
                 itens_xml = infNFe.findall('ns:det', ns)
                 
+                cont_ids_alterados = 0
+
                 for item in itens_xml:
                     prod = item.find('ns:prod', ns)
-                    if codigo_substituto and codigo_substituto.lower() != 'nan':
-                        codigo_final_item = codigo_substituto
-                    else:
-                        codigo_final_item = prod.find('ns:cProd', ns).text
-                    
+                    codigo_original_xml = prod.find('ns:cProd', ns).text
                     nome_produto = prod.find('ns:xProd', ns).text
                     umb = prod.find('ns:uCom', ns).text  
                     quantidade = float(prod.find('ns:qCom', ns).text)
                     valor_unitario = float(prod.find('ns:vUnCom', ns).text)
                     valor_total_item = float(prod.find('ns:vProd', ns).text)
                     
-                    # Captura os impostos como números reais/decimais para formatação posterior
+                    # Reinicia o código substituto para cada item específico do XML
+                    codigo_substituto = None
+                    
+                    # TRIPLA VALIDAÇÃO FILTRADA: Nota + Fornecedor + Descrição do Produto
+                    if col_nf_base and col_emit_base and col_mat_base:
+                        fornecedor_xml_ultra_limpo = limpar_texto_comparacao(fornecedor_final)
+                        nome_prod_xml_ultra_limpo = limpar_texto_comparacao(nome_produto)
+                        
+                        for _, linha_base in df_base.iterrows():
+                            nota_base_str = str(linha_base[col_nf_base]).split('.')[0].strip()
+                            nota_base_limpa = str(int(nota_base_str)) if nota_base_str.isdigit() else nota_base_str
+                            
+                            # 1ª Trava: O número da nota bate?
+                            if nota_base_limpa == num_nota_limpo:
+                                fornecedor_base_ultra_limpo = limpar_texto_comparacao(linha_base[col_emit_base])
+                                
+                                # 2ª Trava: O fornecedor bate?
+                                if fornecedor_base_ultra_limpo in fornecedor_xml_ultra_limpo or fornecedor_xml_ultra_limpo in fornecedor_base_ultra_limpo:
+                                    
+                                    # 3ª Trava (Crucial): Se a base tiver descrição, valida se bate com o produto do XML
+                                    if col_desc_base:
+                                        desc_produto_base_limpa = limpar_texto_comparacao(linha_base[col_desc_base])
+                                        
+                                        # Verifica se uma descrição está contida na outra para capturar o item correto
+                                        if desc_produto_base_limpa in nome_prod_xml_ultra_limpo or nome_prod_xml_ultra_limpo in desc_produto_base_limpa or desc_produto_base_limpa[:10] in nome_prod_xml_ultra_limpo:
+                                            codigo_substituto = str(linha_base[col_mat_base]).strip()
+                                            cont_ids_alterados += 1
+                                            break
+                                    else:
+                                        # Se a sua base de dados não tiver coluna de descrição para desempatar,
+                                        # ele pega o que encontrar (comportamento padrão anterior)
+                                        codigo_substituto = str(linha_base[col_mat_base]).strip()
+                                        cont_ids_alterados += 1
+                                        break
+                    
+                    # Define qual código usar na linha
+                    if codigo_substituto and codigo_substituto.lower() != 'nan':
+                        codigo_final_item = codigo_substituto
+                    else:
+                        codigo_final_item = codigo_original_xml
+                    
+                    # Captura impostos
                     imposto = item.find('ns:imposto', ns)
                     valor_icms_num, valor_ipi_num = 0.0, 0.0
                     if imposto is not None:
@@ -188,9 +219,9 @@ if arquivos_xml:
                 ws.title = f"NF {num_nota}"
                 ws.views.sheetView[0].showGridLines = True
                 
-                cor_azul_escuro, cor_azul_claro = "1B365D", "F0F4F8"
+                cor_azul_escuro, col_azul_claro = "1B365D", "F0F4F8"
                 fill_header = PatternFill(start_color=cor_azul_escuro, end_color=cor_azul_escuro, fill_type="solid")
-                fill_sub_header = PatternFill(start_color=cor_azul_claro, end_color=cor_azul_claro, fill_type="solid")
+                fill_sub_header = PatternFill(start_color=col_azul_claro, end_color=col_azul_claro, fill_type="solid")
                 font_branca_negrito = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
                 font_preta_negrito = Font(name="Calibri", size=11, bold=True, color="000000")
                 font_normal = Font(name="Calibri", size=11)
@@ -225,14 +256,10 @@ if arquivos_xml:
                     ws.cell(row=linha_atual, column=5, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
                     ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
                     
-                    # Formatação numérica pura (sem siglas de moedas ou símbolos de porcentagem)
                     ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
-                    
-                    # Alteração solicitada: Removido 'R$' e configurado com 2 casas decimais
                     ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = '#,##0.00'
                     ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."]).number_format = '#,##0.00'
                     
-                    # Alteração solicitada: Removido '%' e configurado com 2 casas decimais
                     celula_icms = ws.cell(row=linha_atual, column=10, value=prod["ICMS"])
                     celula_icms.number_format = '#,##0.00'
                     celula_icms.alignment = Alignment(horizontal="center")
@@ -296,7 +323,7 @@ if arquivos_xml:
                 buffer.seek(0)
                 
                 fornecedor_limpo = re.sub(r'[\\/*?:"<>|]', "", fornecedor_final).strip()
-                status_origem = "🏷️ [ID Alterado com Sucesso]" if codigo_substituto else "⚠️ [Nota Não Encontrada na Base - Mantido XML]"
+                status_origem = f"🏷️ [{cont_ids_alterados} Itens Atualizados pela Base]" if cont_ids_alterados > 0 else "⚠️ [Mantido XML Original]"
                 
                 st.download_button(
                     label=f"📥 Baixar nota {num_nota} - {fornecedor_limpo} {status_origem}",
