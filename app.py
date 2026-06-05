@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 import pandas as pd
 import io
 import re
+from difflib import SequenceMatcher
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -10,17 +11,20 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
 st.title("📦 RPA Conversor de XML Copacker")
-st.write("Atualize a planilha base e converta seus XMLs")
+st.write("Atualize a planilha base e converta seus XMLs!")
 
 # --- FUNÇÃO PARA LIMPEZA EXTREMA DE TEXTO ---
 def limpar_texto_comparacao(texto):
     if pd.isna(texto):
         return ""
     txt = str(texto).upper().strip()
-    # Remove acentos comuns e pontuações
-    txt = re.sub(r'[.\-\/\,\_]', '', txt)
+    txt = re.sub(r'[.\-\/\,\_\:\(\)]', '', txt)
     txt = txt.replace("LTDA", "").replace("S/A", "").replace("SA", "").replace("S.A", "")
-    return "".join(txt.split())
+    return " ".join(txt.split())
+
+# --- FUNÇÃO PARA CALCULAR SIMILARIDADE ---
+def calcular_semelhanca(texto1, texto2):
+    return SequenceMatcher(None, texto1, texto2).ratio()
 
 # --- 1. SEÇÃO DE UPLOAD DA PLANILHA BASE ---
 st.header("1️⃣ Atualizar Planilha Base (Trânsito)")
@@ -31,26 +35,30 @@ df_base = None
 if arquivo_base_upload is not None:
     try:
         df_base = pd.read_excel(arquivo_base_upload, sheet_name=0)
-        df_base.columns = [str(col).strip().upper() for col in df_base.columns]
-        st.success("✅ Planilha Base carregada e ativa!")
         
-        st.subheader("👀 Dados Ativos no Momento (Últimas 5 linhas):")
+        # Padroniza todas as colunas para maiúsculo, EXCETO a busca da xProd que trataremos com carinho
+        df_base.columns = [str(col).strip().upper() for col in df_base.columns]
+        
+        st.success("✅ Planilha Base carregada e ativa na memória do site!")
+        
+        # Mapeamento dinâmico das colunas obrigatórias
         col_nf = next((c for c in df_base.columns if "NF" in c), None)
         col_emit = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
         col_mat = next((c for c in df_base.columns if "MAT" in c), None)
-        col_desc_base = next((c for c in df_base.columns if "DESC" in c or "PROD" in c or "MATERIAL" in c), None)
+        
+        # Como padronizamos para maiúsculo, a coluna "xProd" virou "XPROD"
+        col_desc_base = "XPROD" if "XPROD" in df_base.columns else next((c for c in df_base.columns if "DESC" in c or "PROD" in c), None)
         
         if col_nf and col_emit and col_mat:
-            # Mostra colunas extras se achar a descrição na base
             colunas_exibicao = [col_nf, col_emit, col_mat]
             nomes_colunas = ["Nota Fiscal (nF)", "Fornecedor (emitNome)", "Código Certo (id_material)"]
             
             if col_desc_base and col_desc_base not in colunas_exibicao:
                 colunas_exibicao.append(col_desc_base)
-                nomes_colunas.append("Descrição na Base")
+                nomes_colunas.append("Descrição (xProd)")
                 
             df_preview = df_base[colunas_exibicao].tail(5)
-            df_preview.columns = nomes_colunas
+            df_preview.columns = ["Nota Fiscal", "Fornecedor", "Código Material", "xProd (Base)"] if col_desc_base else nomes_colunas
             st.dataframe(df_preview, use_container_width=True)
         else:
             st.warning("⚠️ Atenção: Verifique se a sua planilha possui as colunas `nF`, `emitNome` e `id_material`.")
@@ -128,16 +136,14 @@ if arquivos_xml:
                         if esp is not None: especie_volume = esp.text
                         if q_vol is not None: qtde_volume = int(q_vol.text)
 
-                # Mapeia colunas conhecidas da planilha base
                 col_nf_base = next((c for c in df_base.columns if "NF" in c), None)
                 col_emit_base = next((c for c in df_base.columns if "EMIT" in c or "FORN" in c), None)
                 col_mat_base = next((c for c in df_base.columns if "MAT" in c), None)
-                col_desc_base = next((c for c in df_base.columns if "DESC" in c or "PROD" in c or "MATERIAL" in c), None)
+                col_desc_base = "XPROD" if "XPROD" in df_base.columns else next((c for c in df_base.columns if "DESC" in c or "PROD" in c), None)
 
-                # --- MONTAGEM DOS ITENS E BUSCA CIRÚRGICA POR PRODUTO ---
+                # --- MONTAGEM DOS ITENS ---
                 lista_produtos = []
                 itens_xml = infNFe.findall('ns:det', ns)
-                
                 cont_ids_alterados = 0
 
                 for item in itens_xml:
@@ -149,44 +155,49 @@ if arquivos_xml:
                     valor_unitario = float(prod.find('ns:vUnCom', ns).text)
                     valor_total_item = float(prod.find('ns:vProd', ns).text)
                     
-                    # Reinicia o código substituto para cada item específico do XML
+                    # Força o reset para garantir independência total de cada item
                     codigo_substituto = None
                     
-                    # TRIPLA VALIDAÇÃO FILTRADA: Nota + Fornecedor + Descrição do Produto
                     if col_nf_base and col_emit_base and col_mat_base:
                         fornecedor_xml_ultra_limpo = limpar_texto_comparacao(fornecedor_final)
                         nome_prod_xml_ultra_limpo = limpar_texto_comparacao(nome_produto)
+                        
+                        maior_score = -1.0
+                        melhor_codigo_linha = None
                         
                         for _, linha_base in df_base.iterrows():
                             nota_base_str = str(linha_base[col_nf_base]).split('.')[0].strip()
                             nota_base_limpa = str(int(nota_base_str)) if nota_base_str.isdigit() else nota_base_str
                             
-                            # 1ª Trava: O número da nota bate?
+                            # 1ª Trava: Nota Fiscal
                             if nota_base_limpa == num_nota_limpo:
                                 fornecedor_base_ultra_limpo = limpar_texto_comparacao(linha_base[col_emit_base])
                                 
-                                # 2ª Trava: O fornecedor bate?
+                                # 2ª Trava: Fornecedor
                                 if fornecedor_base_ultra_limpo in fornecedor_xml_ultra_limpo or fornecedor_xml_ultra_limpo in fornecedor_base_ultra_limpo:
                                     
-                                    # 3ª Trava (Crucial): Se a base tiver descrição, valida se bate com o produto do XML
+                                    # 3ª Trava Definitiva: Comparação direta usando a coluna xProd mapeada
                                     if col_desc_base:
                                         desc_produto_base_limpa = limpar_texto_comparacao(linha_base[col_desc_base])
                                         
-                                        # Verifica se uma descrição está contida na outra para capturar o item correto
-                                        if desc_produto_base_limpa in nome_prod_xml_ultra_limpo or nome_prod_xml_ultra_limpo in desc_produto_base_limpa or desc_produto_base_limpa[:10] in nome_prod_xml_ultra_limpo:
-                                            codigo_substituto = str(linha_base[col_mat_base]).strip()
-                                            cont_ids_alterados += 1
-                                            break
+                                        # Calcula proximidade textual
+                                        score = calcular_semelhanca(nome_prod_xml_ultra_limpo, desc_produto_base_limpa)
+                                        
+                                        if score > maior_score:
+                                            maior_score = score
+                                            melhor_codigo_linha = str(linha_base[col_mat_base]).strip()
                                     else:
-                                        # Se a sua base de dados não tiver coluna de descrição para desempatar,
-                                        # ele pega o que encontrar (comportamento padrão anterior)
-                                        codigo_substituto = str(linha_base[col_mat_base]).strip()
-                                        cont_ids_alterados += 1
+                                        # Fallback caso não encontre coluna xProd
+                                        melhor_codigo_linha = str(linha_base[col_mat_base]).strip()
+                                        maior_score = 1.0
                                         break
+                        
+                        if melhor_codigo_linha and melhor_codigo_linha.lower() != 'nan':
+                            codigo_substituto = melhor_codigo_linha
                     
-                    # Define qual código usar na linha
-                    if codigo_substituto and codigo_substituto.lower() != 'nan':
+                    if codigo_substituto:
                         codigo_final_item = codigo_substituto
+                        cont_ids_alterados += 1
                     else:
                         codigo_final_item = codigo_original_xml
                     
@@ -323,10 +334,9 @@ if arquivos_xml:
                 buffer.seek(0)
                 
                 fornecedor_limpo = re.sub(r'[\\/*?:"<>|]', "", fornecedor_final).strip()
-                status_origem = f"🏷️ [{cont_ids_alterados} Itens Atualizados pela Base]" if cont_ids_alterados > 0 else "⚠️ [Mantido XML Original]"
                 
                 st.download_button(
-                    label=f"📥 Baixar nota {num_nota} - {fornecedor_limpo} {status_origem}",
+                    label=f"📥 Baixar nota {num_nota} - {fornecedor_limpo}",
                     data=buffer,
                     file_name=f"PLANILHA_NOTA_{num_nota}_{fornecedor_limpo}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
