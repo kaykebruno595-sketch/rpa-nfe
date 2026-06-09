@@ -37,7 +37,7 @@ if arquivo_base_upload is not None:
         col_mat = next((c for c in df_base.columns if "MAT" in c), None)
         col_desc_base = "XPROD" if "XPROD" in df_base.columns else next((c for c in df_base.columns if "DESC" in c or "PROD" in c), None)
         
-       if col_nf and col_emit and col_mat:
+        if col_nf and col_emit and col_mat:
         # Limpa floats esquisitos vindos do Excel na coluna de NF (Ex: 123.0 -> 123)
         df_base[col_nf] = df_base[col_nf].apply(lambda x: str(int(float(x))) if re.match(r'^\d+\.\d+$', str(x)) else str(x).strip())
         
