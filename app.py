@@ -49,5 +49,4 @@ if arquivo_base_upload is not None:
                 
             df_preview = df_base[colunas_exibicao].tail(5)
             st.dataframe(df_preview, use_container_width=True)
-            
             st.session_state['cols_base'] = {'nf': col_nf, 'emit': col_emit, 'mat': col_material}
