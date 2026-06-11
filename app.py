@@ -38,7 +38,6 @@ if arquivo_base_upload is not None:
         col_desc_base = "XPROD" if "XPROD" in df_base.columns else next((c for c in df_base.columns if "DESC" in c or "PROD" in c), None)
         
         if col_nf and col_emit and col_mat:
-            # CORRIGIDO: Agora todas essas linhas estão com o recuo correto para dentro do 'if' e do 'try'
             df_base[col_nf] = df_base[col_nf].apply(lambda x: str(int(float(x))) if re.match(r'^\d+\.\d+$', str(x)) else str(x).strip())
             
             st.success("✅ Planilha Base carregada e ativa na memória do site!")
@@ -53,7 +52,273 @@ if arquivo_base_upload is not None:
             st.session_state['cols_base'] = {'nf': col_nf, 'emit': col_emit, 'mat': col_mat}
         else:
             st.error("❌ Não foi possível encontrar as colunas necessárias (NF, EMIT/FORN, MAT) na planilha.")
+            df_base = None
 
     except Exception as e:
-        # CORRIGIDO: Adicionado o fechamento do bloco try para evitar o erro anterior
         st.error(f"❌ Erro ao ler o arquivo Excel: {e}")
+        df_base = None
+else:
+    st.info("💡 Aguardando o upload da planilha base para ativar a validação de códigos.")
+
+st.write("---")
+
+# --- 2. SEÇÃO DE UPLOAD DOS XMLS (MUDADO: FORA DO BLOCO ELSE PARA FICAR SEMPRE VISÍVEL) ---
+st.header("2️⃣ Processar Arquivos XML")
+arquivos_xml = st.file_uploader("Escolha os arquivos XML da nota", type=["xml"], accept_multiple_files=True)
+
+if arquivos_xml:
+    if df_base is None:
+        st.error("❌ Erro impeditivo: Você precisa carregar uma Planilha Base válida no Passo 1 antes de processar os XMLs!")
+    else:
+        cols_b = st.session_state.get('cols_base')
+        
+        for arquivo in arquivos_xml:
+            try:
+                conteudo_xml = arquivo.read()
+                raiz = ET.fromstring(conteudo_xml)
+                
+                # Tratamento de Namespace flexível
+                ns = {'ns': 'http://www.portalfiscal.inf.br/nfe'}
+                infNFe = raiz.find('.//ns:infNFe', ns)
+                if infNFe is None:
+                    infNFe = raiz.find('.//infNFe')
+                    ns = {}  # Reseta se o XML não contiver os prefixos
+                
+                if infNFe is None:
+                    st.error(f"O arquivo {arquivo.name} não é uma NF-e válida.")
+                    continue
+                    
+                ide = infNFe.find('ns:ide', ns) if ns else infNFe.find('ide')
+                num_nota = ide.find('ns:nNF', ns).text if ns else ide.find('nNF').text
+                num_nota_limpo = str(int(num_nota)) if num_nota.isdigit() else str(num_nota).strip()
+                
+                # --- COLETAR FORNECEDOR (XML) ---
+                fornecedor_final = "Não Identificado"
+                emit = infNFe.find('ns:emit', ns) if ns else infNFe.find('emit')
+                if emit is not None:
+                    xNome = emit.find('ns:xNome', ns) if ns else emit.find('xNome')
+                    xFant = emit.find('ns:xFant', ns) if ns else emit.find('xFant')
+                    if xNome is not None: fornecedor_final = xNome.text
+                    elif xFant is not None: fornecedor_final = xFant.text
+
+                # --- COLETAR CIDADE COM TRAVA (XML) ---
+                cidade_final = "Outros / Não Encontrado"
+                dest = infNFe.find('ns:dest', ns) if ns else infNFe.find('dest')
+                if dest is not None:
+                    enderDest = dest.find('ns:enderDest', ns) if ns else dest.find('enderDest')
+                    if enderDest is not None:
+                        xMun_node = enderDest.find('ns:xMun', ns) if ns else enderDest.find('xMun')
+                        if xMun_node is not None:
+                            cidade_xml_bruta = xMun_node.text.upper()
+                            mapeamento_cidades = {
+                                "CARIACICA": "Positive CO", "NATAL": "Natal", "POSITIVE": "Positive",
+                                "SANTA LUZIA": "Santa Luzia", "ARAMA": "Arama", "LONDRINA": "Londrina", "DIADEMA": "Diadema"
+                            }
+                            cidade_final = next((v for k, v in mapeamento_cidades.items() if k in cidade_xml_bruta), cidade_xml_bruta.title())
+
+                # --- COLETAR PESOS E VOLUMES (XML) ---
+                transp = infNFe.find('ns:transp', ns) if ns else infNFe.find('transp')
+                peso_liquido, peso_bruto, especie_volume, qtde_volume = 0.0, 0.0, "-", 0
+                if transp is not None:
+                    vol = transp.find('ns:vol', ns) if ns else transp.find('vol')
+                    if vol is not None:
+                        p_liq = vol.find('ns:pesoL', ns) if ns else vol.find('pesoL')
+                        p_bru = vol.find('ns:pesoB', ns) if ns else vol.find('pesoB')
+                        esp = vol.find('ns:esp', ns) if ns else vol.find('esp')
+                        q_vol = vol.find('ns:qVol', ns) if ns else vol.find('qVol')
+                        if p_liq is not None: peso_liquido = float(p_liq.text)
+                        if p_bru is not None: peso_bruto = float(p_bru.text)
+                        if esp is not None: especie_volume = esp.text
+                        if q_vol is not None: qtde_volume = int(q_vol.text)
+
+                # --- FILTRAR LINHAS DA NOTA NA BASE COM PANDAS OTIMIZADO ---
+                df_nota_especifica = df_base[df_base[cols_b['nf']] == num_nota_limpo]
+                linhas_nota_base = []
+                
+                if not df_nota_especifica.empty:
+                    fornecedor_xml_ultra_limpo = limpar_texto_comparacao(fornecedor_final)
+                    for _, linha_base in df_nota_especifica.iterrows():
+                        fornecedor_base_ultra_limpo = limpar_texto_comparacao(linha_base[cols_b['emit']])
+                        if fornecedor_base_ultra_limpo in fornecedor_xml_ultra_limpo or fornecedor_xml_ultra_limpo in fornecedor_base_ultra_limpo:
+                            linhas_nota_base.append(str(linha_base[cols_b['mat']]).strip())
+
+                # --- MONTAGEM DOS ITENS GARANTINDO MÚLTIPLOS ITENS DO XML ---
+                lista_produtos = []
+                itens_xml = infNFe.findall('ns:det', ns) if ns else infNFe.findall('det')
+
+                for idx, item in enumerate(itens_xml):
+                    prod = item.find('ns:prod', ns) if ns else item.find('prod')
+                    
+                    if prod is not None:
+                        # Busca estrita e isolada por item do XML para evitar duplicar dados do primeiro
+                        codigo_original_xml = prod.find('ns:cProd', ns).text if ns else prod.find('cProd').text
+                        nome_produto = prod.find('ns:xProd', ns).text if ns else prod.find('xProd').text
+                        umb = prod.find('ns:uCom', ns).text if ns else prod.find('uCom').text  
+                        quantidade = float(prod.find('ns:qCom', ns).text if ns else prod.find('qCom').text)
+                        valor_unitario = float(prod.find('ns:vUnCom', ns).text if ns else prod.find('vUnCom').text)
+                        valor_total_item = float(prod.find('ns:vProd', ns).text if ns else prod.find('vProd').text)
+                        
+                        codigo_substituto = None
+                        if idx < len(linhas_nota_base):
+                            codigo_substituto = lines_nota_base = linhas_nota_base[idx]
+                        
+                        codigo_final_item = codigo_substituto if (codigo_substituto and codigo_substituto.lower() != 'nan') else codigo_original_xml
+                        
+                        # Captura individual de impostos do produto atual
+                        imposto = item.find('ns:imposto', ns) if ns else item.find('imposto')
+                        valor_icms_num, valor_ipi_num = 0.0, 0.0
+                        
+                        if imposto is not None:
+                            icms_bloco = imposto.find('.//ns:ICMS', ns) if ns else imposto.find('.//ICMS')
+                            if icms_bloco is not None:
+                                for sub_tag in icms_bloco.iter():
+                                    if sub_tag.tag.endswith('pICMS'):
+                                        valor_icms_num = float(sub_tag.text)
+                                        break
+                                        
+                            ipi_bloco = imposto.find('.//ns:IPI', ns) if ns else imposto.find('.//IPI')
+                            if ipi_bloco is not None:
+                                for sub_tag in ipi_bloco.iter():
+                                    if sub_tag.tag.endswith('pIPI'):
+                                        valor_ipi_num = float(sub_tag.text)
+                                        break
+                        
+                        lista_produtos.append({
+                            "FORNECEDOR": fornecedor_final,
+                            "CIDADE/MUNICÍPIO": cidade_final,
+                            "CODIGO": codigo_final_item,
+                            "DESCRIÇÃO": nome_produto,
+                            "NOTA FISCAL": num_nota_limpo,
+                            "UMB": umb,
+                            "QTDE": quantidade,
+                            "VLR. UNT.": valor_unitario,
+                            "VLR. TT.": valor_total_item,
+                            "ICMS": valor_icms_num,
+                            "IPI": valor_ipi_num
+                        })
+
+                # --- FORMATAÇÃO DO ARQUIVO EXCEL FINAL ---
+                wb = Workbook()
+                ws = wb.active
+                ws.title = f"NF {num_nota_limpo}"
+                ws.views.sheetView[0].showGridLines = True
+                
+                cor_azul_escuro, col_azul_claro = "1B365D", "F0F4F8"
+                fill_header = PatternFill(start_color=cor_azul_escuro, end_color=cor_azul_escuro, fill_type="solid")
+                fill_sub_header = PatternFill(start_color=col_azul_claro, end_color=col_azul_claro, fill_type="solid")
+                font_branca_negrito = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+                font_preta_negrito = Font(name="Calibri", size=11, bold=True, color="000000")
+                font_normal = Font(name="Calibri", size=11)
+                
+                border_fina = Border(
+                    left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'),
+                    top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3')
+                )
+                
+                ws.merge_cells("A1:K1")
+                ws["A1"] = "DADOS MATERIAIS"
+                ws["A1"].fill = fill_header
+                ws["A1"].font = font_branca_negrito
+                ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
+                ws.row_dimensions[1].height = 25
+                
+                colunas = ["FORNECEDOR", "CIDADE/MUNICÍPIO", "CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
+                for col_idx, texto_coluna in enumerate(colunas, 1):
+                    celula = ws.cell(row=2, column=col_idx, value=texto_coluna)
+                    celula.fill = fill_header
+                    celula.font = font_branca_negrito
+                    celula.alignment = Alignment(horizontal="center", vertical="center")
+                    celula.border = border_fina
+                ws.row_dimensions[2].height = 22
+                
+                linha_atual = 3
+                for prod in lista_produtos:
+                    ws.cell(row=linha_atual, column=1, value=prod["FORNECEDOR"]).alignment = Alignment(horizontal="left")
+                    ws.cell(row=linha_atual, column=2, value=prod["CIDADE/MUNICÍPIO"]).alignment = Alignment(horizontal="left")
+                    ws.cell(row=linha_atual, column=3, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
+                    ws.cell(row=linha_atual, column=4, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
+                    
+                    try:
+                        ws.cell(row=linha_atual, column=5, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
+                    except ValueError:
+                        ws.cell(row=linha_atual, column=5, value=prod["NOTA FISCAL"]).alignment = Alignment(horizontal="center")
+                        
+                    ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
+                    
+                    ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
+                    ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = '#,##0.00'
+                    ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."]).number_format = '#,##0.00'
+                    
+                    celula_icms = ws.cell(row=linha_atual, column=10, value=prod["ICMS"])
+                    celula_icms.number_format = '#,##0.00'
+                    celula_icms.alignment = Alignment(horizontal="center")
+                    
+                    celula_ipi = ws.cell(row=linha_atual, column=11, value=prod["IPI"])
+                    celula_ipi.number_format = '#,##0.00'
+                    celula_ipi.alignment = Alignment(horizontal="center")
+                    
+                    for c in range(1, 12):
+                        ws.cell(row=linha_atual, column=c).font = font_normal
+                        ws.cell(row=linha_atual, column=c).border = border_fina
+                    ws.row_dimensions[linha_atual].height = 20
+                    linha_atual += 1
+                    
+                linha_atual += 1
+                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=3)
+                celula_fiscal_titulo = ws.cell(row=linha_atual, column=1, value="DADOS FISCAIS")
+                celula_fiscal_titulo.fill = fill_header
+                celula_fiscal_titulo.font = font_branca_negrito
+                ws.row_dimensions[linha_atual].height = 22
+                linha_atual += 1
+                
+                dados_fiscais_valores = [
+                    ("PESO BRUTO", peso_bruto),
+                    ("PESO LÍQUIDO", peso_liquido),
+                    ("ESPÉCIE DE VOLUME", especie_volume),
+                    ("QTDE VOLUME", qtde_volume)
+                ]
+                
+                for label, valor in dados_fiscais_valores:
+                    ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
+                    c_label = ws.cell(row=linha_atual, column=1, value=label)
+                    c_label.fill = fill_sub_header
+                    c_label.font = font_preta_negrito
+                    
+                    c_valor = ws.cell(row=linha_atual, column=3, value=valor)
+                    if isinstance(valor, float): c_valor.number_format = '#,##0.00'
+                    c_valor.font = font_normal
+                    c_valor.border = border_fina
+                    c_valor.alignment = Alignment(horizontal="left")
+                    
+                    for col_borda in range(1, 4):
+                        ws.cell(row=linha_atual, column=col_borda).border = border_fina
+                    ws.row_dimensions[linha_atual].height = 18
+                    linha_atual += 1
+                    
+                for col in ws.columns:
+                    max_len = 0
+                    col_letter = get_column_letter(col[0].column)
+                    for cell in col:
+                        if cell.row == 1: continue  
+                        if cell.value: max_len = max(max_len, len(str(cell.value)))
+                    ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+                
+                ws.column_dimensions['A'].width = 32
+                ws.column_dimensions['B'].width = 22
+                ws.column_dimensions['D'].width = 45
+                
+                buffer = io.BytesIO()
+                wb.save(buffer)
+                buffer.seek(0)
+                
+                fornecedor_limpo = re.sub(r'[\\/*?:"<>|]', "", fornecedor_final).strip()
+                
+                st.download_button(
+                    label=f"📥 Baixar nota {num_nota_limpo} - {fornecedor_limpo}",
+                    data=buffer,
+                    file_name=f"PLANILHA_NOTA_{num_nota_limpo}_{fornecedor_limpo}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
+            except Exception as e:
+                st.error(f"Erro ao processar o arquivo {arquivo.name}: {e}")
