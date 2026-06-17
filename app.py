@@ -62,7 +62,7 @@ else:
 
 st.write("---")
 
-# --- 2. SEÇÃO DE UPLOAD DOS XMLS (MUDADO: FORA DO BLOCO ELSE PARA FICAR SEMPRE VISÍVEL) ---
+# --- 2. SEÇÃO DE UPLOAD DOS XMLS ---
 st.header("2️⃣ Processar Arquivos XML")
 arquivos_xml = st.file_uploader("Escolha os arquivos XML da nota", type=["xml"], accept_multiple_files=True)
 
@@ -77,12 +77,11 @@ if arquivos_xml:
                 conteudo_xml = arquivo.read()
                 raiz = ET.fromstring(conteudo_xml)
                 
-                # Tratamento de Namespace flexível
                 ns = {'ns': 'http://www.portalfiscal.inf.br/nfe'}
                 infNFe = raiz.find('.//ns:infNFe', ns)
                 if infNFe is None:
                     infNFe = raiz.find('.//infNFe')
-                    ns = {}  # Reseta se o XML não contiver os prefixos
+                    ns = {}
                 
                 if infNFe is None:
                     st.error(f"O arquivo {arquivo.name} não é uma NF-e válida.")
@@ -131,7 +130,7 @@ if arquivos_xml:
                         if esp is not None: especie_volume = esp.text
                         if q_vol is not None: qtde_volume = int(q_vol.text)
 
-                # --- FILTRAR LINHAS DA NOTA NA BASE COM PANDAS OTIMIZADO ---
+                # --- FILTRAR LINHAS DA NOTA NA BASE ---
                 df_nota_especifica = df_base[df_base[cols_b['nf']] == num_nota_limpo]
                 linhas_nota_base = []
                 
@@ -142,7 +141,7 @@ if arquivos_xml:
                         if fornecedor_base_ultra_limpo in fornecedor_xml_ultra_limpo or fornecedor_xml_ultra_limpo in fornecedor_base_ultra_limpo:
                             linhas_nota_base.append(str(linha_base[cols_b['mat']]).strip())
 
-                # --- MONTAGEM DOS ITENS GARANTINDO MÚLTIPLOS ITENS DO XML ---
+                # --- MONTAGEM DOS ITENS ---
                 lista_produtos = []
                 itens_xml = infNFe.findall('ns:det', ns) if ns else infNFe.findall('det')
 
@@ -150,7 +149,6 @@ if arquivos_xml:
                     prod = item.find('ns:prod', ns) if ns else item.find('prod')
                     
                     if prod is not None:
-                        # Busca estrita e isolada por item do XML para evitar duplicar dados do primeiro
                         codigo_original_xml = prod.find('ns:cProd', ns).text if ns else prod.find('cProd').text
                         nome_produto = prod.find('ns:xProd', ns).text if ns else prod.find('xProd').text
                         umb = prod.find('ns:uCom', ns).text if ns else prod.find('uCom').text  
@@ -160,11 +158,10 @@ if arquivos_xml:
                         
                         codigo_substituto = None
                         if idx < len(linhas_nota_base):
-                            codigo_substituto = lines_nota_base = linhas_nota_base[idx]
+                            codigo_substituto = linhas_nota_base[idx]
                         
                         codigo_final_item = codigo_substituto if (codigo_substituto and codigo_substituto.lower() != 'nan') else codigo_original_xml
                         
-                        # Captura individual de impostos do produto atual
                         imposto = item.find('ns:imposto', ns) if ns else item.find('imposto')
                         valor_icms_num, valor_ipi_num = 0.0, 0.0
                         
@@ -184,8 +181,6 @@ if arquivos_xml:
                                         break
                         
                         lista_produtos.append({
-                            "FORNECEDOR": fornecedor_final,
-                            "CIDADE/MUNICÍPIO": cidade_final,
                             "CODIGO": codigo_final_item,
                             "DESCRIÇÃO": nome_produto,
                             "NOTA FISCAL": num_nota_limpo,
@@ -197,12 +192,13 @@ if arquivos_xml:
                             "IPI": valor_ipi_num
                         })
 
-                # --- FORMATAÇÃO DO ARQUIVO EXCEL FINAL ---
+                # --- NOVO DESIGN DA PLANILHA (OPENPYXL) ---
                 wb = Workbook()
                 ws = wb.active
                 ws.title = f"NF {num_nota_limpo}"
                 ws.views.sheetView[0].showGridLines = True
                 
+                # Cores de Estilo do cabeçalho
                 cor_azul_escuro, col_azul_claro = "1B365D", "F0F4F8"
                 fill_header = PatternFill(start_color=cor_azul_escuro, end_color=cor_azul_escuro, fill_type="solid")
                 fill_sub_header = PatternFill(start_color=col_azul_claro, end_color=col_azul_claro, fill_type="solid")
@@ -215,39 +211,63 @@ if arquivos_xml:
                     top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3')
                 )
                 
-                ws.merge_cells("A1:K1")
+                # Linha 1: Título Geral do Bloco
+                ws.merge_cells("A1:N1")
                 ws["A1"] = "DADOS MATERIAIS"
                 ws["A1"].fill = fill_header
                 ws["A1"].font = font_branca_negrito
                 ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
                 ws.row_dimensions[1].height = 25
                 
-                colunas = ["FORNECEDOR", "CIDADE/MUNICÍPIO", "CÓDIGO", "DESCRIÇÃO", "NOTA FISCAL", "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI"]
+                # Linha 2: Duplo cabeçalho para "LANÇAR NF" e "INDUSTRIALIZAÇÃO"
+                ws.merge_cells("L2:M2")
+                ws["L2"] = "LANÇAR NF"
+                ws["L2"].fill = fill_header
+                ws["L2"].font = font_branca_negrito
+                ws["L2"].alignment = Alignment(horizontal="center", vertical="center")
+                
+                ws.cell(row=2, column=14, value="INDUSTRIALIZAÇÃO").fill = fill_header
+                ws.cell(row=2, column=14).font = font_branca_negrito
+                ws.cell(row=2, column=14).alignment = Alignment(horizontal="center", vertical="center")
+                
+                # Linha 3: Cabeçalhos Reais das Colunas Exatas da Imagem
+                colunas = [
+                    "CÓDIGO", "DESCRIÇÃO", "CENTRO", "NOTA FISCAL", "DEPÓSITO", 
+                    "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI", 
+                    "OC/ITEM", "OC/ITEM", "OC/ITEM"
+                ]
+                
                 for col_idx, texto_coluna in enumerate(colunas, 1):
-                    celula = ws.cell(row=2, column=col_idx, value=texto_coluna)
+                    celula = ws.cell(row=3, column=col_idx, value=texto_coluna)
                     celula.fill = fill_header
                     celula.font = font_branca_negrito
                     celula.alignment = Alignment(horizontal="center", vertical="center")
                     celula.border = border_fina
-                ws.row_dimensions[2].height = 22
+                ws.row_dimensions[3].height = 22
                 
-                linha_atual = 3
+                # Preenchimento dos dados dinâmicos e das colunas vazias solicitadas
+                linha_atual = 4
                 for prod in lista_produtos:
-                    ws.cell(row=linha_atual, column=1, value=prod["FORNECEDOR"]).alignment = Alignment(horizontal="left")
-                    ws.cell(row=linha_atual, column=2, value=prod["CIDADE/MUNICÍPIO"]).alignment = Alignment(horizontal="left")
-                    ws.cell(row=linha_atual, column=3, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
-                    ws.cell(row=linha_atual, column=4, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
+                    ws.cell(row=linha_atual, column=1, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
+                    ws.cell(row=linha_atual, column=2, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
+                    
+                    # Coluna 3: CENTRO (Vazia)
+                    ws.cell(row=linha_atual, column=3, value="") 
                     
                     try:
-                        ws.cell(row=linha_atual, column=5, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
+                        ws.cell(row=linha_atual, column=4, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
                     except ValueError:
-                        ws.cell(row=linha_atual, column=5, value=prod["NOTA FISCAL"]).alignment = Alignment(horizontal="center")
+                        ws.cell(row=linha_atual, column=4, value=prod["NOTA FISCAL"]).alignment = Alignment(horizontal="center")
                         
-                    ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
+                    # Coluna 5: DEPÓSITO (Vazia)
+                    ws.cell(row=linha_atual, column=5, value="")
                     
+                    ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
                     ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
                     ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = '#,##0.00'
-                    ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."]).number_format = '#,##0.00'
+                    
+                    celula_vlr_tt = ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."])
+                    celula_vlr_tt.number_format = '"R$ " #,##0.00;"R$ " -'
                     
                     celula_icms = ws.cell(row=linha_atual, column=10, value=prod["ICMS"])
                     celula_icms.number_format = '#,##0.00'
@@ -257,13 +277,19 @@ if arquivos_xml:
                     celula_ipi.number_format = '#,##0.00'
                     celula_ipi.alignment = Alignment(horizontal="center")
                     
-                    for c in range(1, 12):
+                    # Colunas 12, 13 e 14: Campos OC/ITEM (Vazios)
+                    ws.cell(row=linha_atual, column=12, value="")
+                    ws.cell(row=linha_atual, column=13, value="")
+                    ws.cell(row=linha_atual, column=14, value="")
+                    
+                    for c in range(1, 15):
                         ws.cell(row=linha_atual, column=c).font = font_normal
                         ws.cell(row=linha_atual, column=c).border = border_fina
                     ws.row_dimensions[linha_atual].height = 20
                     linha_atual += 1
                     
-                linha_atual += 1
+                # Espaçamento e estruturação dos Blocos Inferiores (Dados Fiscais)
+                linha_atual += 2
                 ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=3)
                 celula_fiscal_titulo = ws.cell(row=linha_atual, column=1, value="DADOS FISCAIS")
                 celula_fiscal_titulo.fill = fill_header
@@ -294,18 +320,41 @@ if arquivos_xml:
                         ws.cell(row=linha_atual, column=col_borda).border = border_fina
                     ws.row_dimensions[linha_atual].height = 18
                     linha_atual += 1
+                
+                # Estruturação dos Campos de Transporte Inferiores (Vazios como no modelo)
+                linha_atual += 1
+                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=3)
+                celula_transp_titulo = ws.cell(row=linha_atual, column=1, value="DADOS DE TRANSPORTE")
+                celula_transp_titulo.fill = fill_header
+                celula_transp_titulo.font = font_branca_negrito
+                ws.row_dimensions[linha_atual].height = 22
+                linha_atual += 1
+                
+                dados_transporte_labels = ["FRETE PAGO", "CÓDIGO", "TRANSPORTADORA"]
+                for label in dados_transporte_labels:
+                    ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
+                    c_label = ws.cell(row=linha_atual, column=1, value=label)
+                    c_label.fill = fill_sub_header
+                    c_label.font = font_preta_negrito
                     
+                    c_vazio = ws.cell(row=linha_atual, column=3, value="")
+                    for col_borda in range(1, 4):
+                        ws.cell(row=linha_atual, column=col_borda).border = border_fina
+                    ws.row_dimensions[linha_atual].height = 18
+                    linha_atual += 1
+                
+                # Auto-ajuste inteligente de tamanho das colunas
                 for col in ws.columns:
                     max_len = 0
                     col_letter = get_column_letter(col[0].column)
                     for cell in col:
-                        if cell.row == 1: continue  
+                        if cell.row in [1, 2]: continue  
                         if cell.value: max_len = max(max_len, len(str(cell.value)))
                     ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
                 
-                ws.column_dimensions['A'].width = 32
-                ws.column_dimensions['B'].width = 22
-                ws.column_dimensions['D'].width = 45
+                ws.column_dimensions['A'].width = 16
+                ws.column_dimensions['B'].width = 45
+                ws.column_dimensions['D'].width = 16
                 
                 buffer = io.BytesIO()
                 wb.save(buffer)
