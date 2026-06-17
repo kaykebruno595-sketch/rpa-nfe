@@ -6,12 +6,20 @@ import re
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.datavalidation import DataValidation  # IMPORTADO PARA CRIAR OS SELETORES
+from openpyxl.worksheet.datavalidation import DataValidation
 
 st.set_page_config(page_title="RPA - Gerador de Planilha de Nota", layout="centered")
 
 st.title("📦 RPA Conversor de XML Copacker")
 st.write("Atualize a planilha base e converta seus XMLs!")
+
+# ==============================================================================
+# ⚙️ CONFIGURAÇÃO DOS SELETORES
+# ==============================================================================
+opcoes_remetente = '"LONDRINA, ARAMA, POSITIVE CO, SANTA LUZIA"'
+opcoes_movimentacao = '"REMESSA PARA INDUSTRIALIZAÇÃO, REMESSA PARA ARMAZENAGEM"'
+opcoes_dest_descricao = '"AMENDOAS DO BRASIL LTDA, BEBIDAS POTY LTDA, CASTROLANDA COOPERATIVA AGROIND, CIA IGUAÇU DE CAFE SOLÚVEL, FRYSK INDUSTRIAL LTDA EM RECUPERA, REVPACK TECN COM COMP PLASTICOS LTD, USINA DE LACTICINIOS JUSSARA, EMERGENTCOLD, EXPRESSO MANIR LTDA, GRAN PAR LOGISTICA LTDA, SUPERFRIO ARMAZENS GERAIS SA, EF SOLUÇÕES, MMC INDUSTRIA DE PRODUTOS NUTRATEC"'
+# ==============================================================================
 
 # --- FUNÇÃO PARA LIMPEZA EXTREMA DE TEXTO ---
 def limpar_texto_comparacao(texto):
@@ -198,12 +206,6 @@ if arquivos_xml:
                 ws = wb.active
                 ws.title = f"NF {num_nota_limpo}"
                 ws.views.sheetView[0].showGridLines = True
-                
-                # Definição das Opções dos Seletores (MODIFIQUE OS TEXTOS ABAIXO SE PRECISAR)
-                opcoes_remetente = '"LONDRINA, ARAMA, POSITIVE CO, SANTA LUZIA"'
-                opcoes_movimentacao = '"REMESSA PARA INDUSTRIALIZAÇÃO, REMESSA PARA ARMAZENAGEM"'
-                opcoes_dest_descricao = '"AMENDOAS DO BRASIL LTDA, BEBIDAS POTY LTDA, CASTROLANDA COOPERATIVA AGROIND, CIA IGUAÇU DE CAFE SOLÚVEL, FRYSK INDUSTRIAL LTDA EM RECUPERA, REVPACK TECN COM COMP PLASTICOS LTD, USINA DE LACTICINIOS JUSSARA, EMERGENTCOLD, EXPRESSO MANIR LTDA, GRAN PAR LOGISTICA LTDA, SUPERFRIO ARMAZENS GERAIS SA, EF SOLUÇÕES, MMC INDUSTRIA DE PRODUTOS NUTRATEC"'
-                opcoes_frete = '"ARAMA, LONDRINA, POSITIVE CO, SANTA LUZIA"'
 
                 # Estilos visuais
                 cor_azul_escuro, col_azul_claro = "1B365D", "F0F4F8"
@@ -231,7 +233,7 @@ if arquivos_xml:
                 
                 dv_remetente = DataValidation(type="list", formula1=opcoes_remetente, allow_blank=True)
                 ws.add_data_validation(dv_remetente)
-                dv_remetente.add("B1") # Aplica a setinha na célula mesclada B1
+                dv_remetente.add("B1")
 
                 # 2. Movimentação + Seletor
                 ws["A2"] = "MOVIMENTAÇÃO"
@@ -255,7 +257,7 @@ if arquivos_xml:
                 ws["A3"].alignment = Alignment(horizontal="center", vertical="center")
                 ws.row_dimensions[3].height = 20
 
-                # 4. Destinatário Código + Seletor
+                # 4. Destinatário Código (SEM SELETOR, LIVRE PARA DIGITAÇÃO)
                 ws["A4"] = "CÓDIGO"
                 ws["A4"].fill = fill_header
                 ws["A4"].font = font_branca_negrito
@@ -263,10 +265,6 @@ if arquivos_xml:
                 ws.merge_cells("B4:D4")
                 ws["B4"].border = border_fina
                 ws.row_dimensions[4].height = 20
-                
-                dv_dest_cod = DataValidation(type="list", formula1=opcoes_dest_codigo, allow_blank=True)
-                ws.add_data_validation(dv_dest_cod)
-                dv_dest_cod.add("B4")
 
                 # 5. Destinatário Descrição + Seletor
                 ws["A5"] = "DESCRIÇÃO"
@@ -322,14 +320,14 @@ if arquivos_xml:
                 for prod in lista_produtos:
                     ws.cell(row=linha_atual, column=1, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
                     ws.cell(row=linha_atual, column=2, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
-                    ws.cell(row=linha_atual, column=3, value="") # CENTRO
+                    ws.cell(row=linha_atual, column=3, value="") 
                     
                     try:
                         ws.cell(row=linha_atual, column=4, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
                     except ValueError:
                         ws.cell(row=linha_atual, column=4, value=prod["NOTA FISCAL"]).alignment = Alignment(horizontal="center")
                         
-                    ws.cell(row=linha_atual, column=5, value="") # DEPÓSITO
+                    ws.cell(row=linha_atual, column=5, value="") 
                     ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
                     ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
                     ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = '#,##0.00'
@@ -387,48 +385,6 @@ if arquivos_xml:
                         ws.cell(row=linha_atual, column=col_borda).border = border_fina
                     ws.row_dimensions[linha_atual].height = 18
                     linha_atual += 1
-                
-                # --- BLOCO DADOS DE TRANSPORTE COM SELETORES ---
-                linha_atual += 1
-                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=3)
-                celula_transp_titulo = ws.cell(row=linha_atual, column=1, value="DADOS DE TRANSPORTE")
-                celula_transp_titulo.fill = fill_header
-                celula_transp_titulo.font = font_branca_negrito
-                ws.row_dimensions[linha_atual].height = 22
-                linha_atual += 1
-                
-                # 1. Frete Pago + Seletor
-                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
-                c_label = ws.cell(row=linha_atual, column=1, value="FRETE PAGO")
-                c_label.fill = fill_sub_header
-                c_label.font = font_preta_negrito
-                ws.cell(row=linha_atual, column=3, value="").border = border_fina
-                dv_frete = DataValidation(type="list", formula1=opcoes_frete, allow_blank=True)
-                ws.add_data_validation(dv_frete)
-                dv_frete.add(f"C{linha_atual}")
-                for cb in range(1, 4): ws.cell(row=linha_atual, column=cb).border = border_fina
-                linha_atual += 1
-                
-                # 2. Código
-                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
-                c_label = ws.cell(row=linha_atual, column=1, value="CÓDIGO")
-                c_label.fill = fill_sub_header
-                c_label.font = font_preta_negrito
-                ws.cell(row=linha_atual, column=3, value="").border = border_fina
-                for cb in range(1, 4): ws.cell(row=linha_atual, column=cb).border = border_fina
-                linha_atual += 1
-                
-                # 3. Transportadora + Seletor
-                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
-                c_label = ws.cell(row=linha_atual, column=1, value="TRANSPORTADORA")
-                c_label.fill = fill_sub_header
-                c_label.font = font_preta_negrito
-                ws.cell(row=linha_atual, column=3, value="").border = border_fina
-                dv_transp = DataValidation(type="list", formula1=opcoes_transportadora, allow_blank=True)
-                ws.add_data_validation(dv_transp)
-                dv_transp.add(f"C{linha_atual}")
-                for cb in range(1, 4): ws.cell(row=linha_atual, column=cb).border = border_fina
-                linha_atual += 1
                 
                 # Auto-ajuste de colunas inteligente
                 for col in ws.columns:
