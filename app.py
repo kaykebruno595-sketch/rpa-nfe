@@ -304,4 +304,157 @@ if arquivos_xml:
                 ws.cell(row=8, column=14).alignment = Alignment(horizontal="center", vertical="center")
                 ws.row_dimensions[8].height = 20
 
-                colunas =
+                colunas = [
+                    "CÓDIGO", "DESCRIÇÃO", "CENTRO", "NOTA FISCAL", "DEPÓSITO", 
+                    "UMB", "QTDE", "VLR. UNT.", "VLR. TT.", "ICMS", "IPI", 
+                    "OC/ITEM", "OC/ITEM", "OC/ITEM"
+                ]
+                
+                for col_idx, texto_coluna in enumerate(colunas, 1):
+                    celula = ws.cell(row=9, column=col_idx, value=texto_coluna)
+                    celula.fill = fill_header
+                    celula.font = font_branca_negrito
+                    celula.alignment = Alignment(horizontal="center", vertical="center")
+                    celula.border = border_fina
+                ws.row_dimensions[9].height = 22
+                
+                linha_atual = 10
+                for prod in lista_produtos:
+                    ws.cell(row=linha_atual, column=1, value=prod["CODIGO"]).alignment = Alignment(horizontal="center")
+                    ws.cell(row=linha_atual, column=2, value=prod["DESCRIÇÃO"]).alignment = Alignment(horizontal="left")
+                    ws.cell(row=linha_atual, column=3, value="") # CENTRO
+                    
+                    try:
+                        ws.cell(row=linha_atual, column=4, value=int(prod["NOTA FISCAL"])).alignment = Alignment(horizontal="center")
+                    except ValueError:
+                        ws.cell(row=linha_atual, column=4, value=prod["NOTA FISCAL"]).alignment = Alignment(horizontal="center")
+                        
+                    ws.cell(row=linha_atual, column=5, value="") # DEPÓSITO
+                    ws.cell(row=linha_atual, column=6, value=prod["UMB"]).alignment = Alignment(horizontal="center")
+                    ws.cell(row=linha_atual, column=7, value=prod["QTDE"]).number_format = '#,##0.00'
+                    ws.cell(row=linha_atual, column=8, value=prod["VLR. UNT."]).number_format = '#,##0.00'
+                    
+                    celula_vlr_tt = ws.cell(row=linha_atual, column=9, value=prod["VLR. TT."])
+                    celula_vlr_tt.number_format = '"R$ " #,##0.00;"R$ " -'
+                    
+                    celula_icms = ws.cell(row=linha_atual, column=10, value=prod["ICMS"])
+                    celula_icms.number_format = '#,##0.00'
+                    celula_icms.alignment = Alignment(horizontal="center")
+                    
+                    celula_ipi = ws.cell(row=linha_atual, column=11, value=prod["IPI"])
+                    celula_ipi.number_format = '#,##0.00'
+                    celula_ipi.alignment = Alignment(horizontal="center")
+                    
+                    ws.cell(row=linha_atual, column=12, value="")
+                    ws.cell(row=linha_atual, column=13, value="")
+                    ws.cell(row=linha_atual, column=14, value="")
+                    
+                    for c in range(1, 15):
+                        ws.cell(row=linha_atual, column=c).font = font_normal
+                        ws.cell(row=linha_atual, column=c).border = border_fina
+                    ws.row_dimensions[linha_atual].height = 20
+                    linha_atual += 1
+                    
+                # --- BLOCO DADOS FISCAIS ---
+                linha_atual += 2
+                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=3)
+                celula_fiscal_titulo = ws.cell(row=linha_atual, column=1, value="DADOS FISCAIS")
+                celula_fiscal_titulo.fill = fill_header
+                celula_fiscal_titulo.font = font_branca_negrito
+                ws.row_dimensions[linha_atual].height = 22
+                linha_atual += 1
+                
+                dados_fiscais_valores = [
+                    ("PESO BRUTO", peso_bruto),
+                    ("PESO LÍQUIDO", peso_liquido),
+                    ("ESPÉCIE DE VOLUME", especie_volume),
+                    ("QTDE VOLUME", qtde_volume)
+                ]
+                
+                for label, valor in dados_fiscais_valores:
+                    ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
+                    c_label = ws.cell(row=linha_atual, column=1, value=label)
+                    c_label.fill = fill_sub_header
+                    c_label.font = font_preta_negrito
+                    
+                    c_valor = ws.cell(row=linha_atual, column=3, value=valor)
+                    if isinstance(valor, float): c_valor.number_format = '#,##0.00'
+                    c_valor.font = font_normal
+                    c_valor.border = border_fina
+                    c_valor.alignment = Alignment(horizontal="left")
+                    
+                    for col_borda in range(1, 4):
+                        ws.cell(row=linha_atual, column=col_borda).border = border_fina
+                    ws.row_dimensions[linha_atual].height = 18
+                    linha_atual += 1
+                
+                # --- BLOCO DADOS DE TRANSPORTE COM SELETORES ---
+                linha_atual += 1
+                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=3)
+                celula_transp_titulo = ws.cell(row=linha_atual, column=1, value="DADOS DE TRANSPORTE")
+                celula_transp_titulo.fill = fill_header
+                celula_transp_titulo.font = font_branca_negrito
+                ws.row_dimensions[linha_atual].height = 22
+                linha_atual += 1
+                
+                # 1. Frete Pago + Seletor
+                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
+                c_label = ws.cell(row=linha_atual, column=1, value="FRETE PAGO")
+                c_label.fill = fill_sub_header
+                c_label.font = font_preta_negrito
+                ws.cell(row=linha_atual, column=3, value="").border = border_fina
+                dv_frete = DataValidation(type="list", formula1=opcoes_frete, allow_blank=True)
+                ws.add_data_validation(dv_frete)
+                dv_frete.add(f"C{linha_atual}")
+                for cb in range(1, 4): ws.cell(row=linha_atual, column=cb).border = border_fina
+                linha_atual += 1
+                
+                # 2. Código
+                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
+                c_label = ws.cell(row=linha_atual, column=1, value="CÓDIGO")
+                c_label.fill = fill_sub_header
+                c_label.font = font_preta_negrito
+                ws.cell(row=linha_atual, column=3, value="").border = border_fina
+                for cb in range(1, 4): ws.cell(row=linha_atual, column=cb).border = border_fina
+                linha_atual += 1
+                
+                # 3. Transportadora + Seletor
+                ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=2)
+                c_label = ws.cell(row=linha_atual, column=1, value="TRANSPORTADORA")
+                c_label.fill = fill_sub_header
+                c_label.font = font_preta_negrito
+                ws.cell(row=linha_atual, column=3, value="").border = border_fina
+                dv_transp = DataValidation(type="list", formula1=opcoes_transportadora, allow_blank=True)
+                ws.add_data_validation(dv_transp)
+                dv_transp.add(f"C{linha_atual}")
+                for cb in range(1, 4): ws.cell(row=linha_atual, column=cb).border = border_fina
+                linha_atual += 1
+                
+                # Auto-ajuste de colunas inteligente
+                for col in ws.columns:
+                    max_len = 0
+                    col_letter = get_column_letter(col[0].column)
+                    for cell in col:
+                        if cell.row in [1, 2, 3, 4, 5, 7, 8]: continue  
+                        if cell.value: max_len = max(max_len, len(str(cell.value)))
+                    ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+                
+                ws.column_dimensions['A'].width = 16
+                ws.column_dimensions['B'].width = 45
+                ws.column_dimensions['D'].width = 16
+                
+                buffer = io.BytesIO()
+                wb.save(buffer)
+                buffer.seek(0)
+                
+                fornecedor_limpo = re.sub(r'[\\/*?:"<>|]', "", fornecedor_final).strip()
+                
+                st.download_button(
+                    label=f"📥 Baixar nota {num_nota_limpo} - {fornecedor_limpo}",
+                    data=buffer,
+                    file_name=f"PLANILHA_NOTA_{num_nota_limpo}_{fornecedor_limpo}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                
+            except Exception as e:
+                st.error(f"Erro ao processar o arquivo {arquivo.name}: {e}")
